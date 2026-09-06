@@ -65,7 +65,9 @@ SV_POCKET_L = SV_L + SLIDING_FIT      # berceau qui enserre le corps
 SV_POCKET_W = SV_W + SLIDING_FIT
 
 # =============================================================================
-#  ROUES (x2, strictement identiques — pas de miroir)
+#  ROUES (x2) — OBSOLÈTE depuis la v2 : remplacées par les PIEDS EN ARC.
+#  Les cotes restent la référence d'implantation (rayon, largeur, position X)
+#  car le corps n'a PAS changé de géométrie externe.
 # =============================================================================
 WHEEL_D = 65.0
 WHEEL_R = WHEEL_D / 2.0
@@ -79,6 +81,35 @@ GRUB_D = 2.2                                 # 2 vis M2 radiales de blocage
 SPOKES = 6
 SPOKE_T = 3.0
 RIM_CHAM = 0.6
+
+# =============================================================================
+#  PIED EN ARC (x2 identiques) — servos SG90 STANDARD 180°, pas de rotation
+#  continue. Le pied est une portion de couronne qui roule sur le sol comme un
+#  patin ; le débattement +/-90° du servo est entièrement couvert par l'arc.
+# =============================================================================
+FOOT_R = WHEEL_R              # 32.5 : rayon extérieur, inchangé
+FOOT_W = WHEEL_W              # 9.0  : largeur, inchangée
+FOOT_SPAN = 200.0             # ouverture angulaire de l'arc (+/-100° au neutre)
+FOOT_RIM_T = 3.2              # bande de roulement PLEINE et lisse
+FOOT_HUB_D = 18.0             # moyeu central
+FOOT_RIB_T = 3.2              # nervure radiale
+FOOT_RIBS = 5                 # dont une à chaque extrémité de l'arc
+FOOT_BAND_R0 = 19.0           # arc intermédiaire de rigidification
+FOOT_BAND_R1 = 22.2
+# --- empreinte du palonnier (horn) SG90 ------------------------------------
+# L'axe cannelé 25 dents ne se reprend PAS directement : on visse le palonnier
+# fourni sur l'axe (vis M2 centrale), puis le pied sur le palonnier. L'empreinte
+# est donc du côté SERVO (face interne) — c'est la seule face qui puisse
+# l'accueillir, l'axe ne dépassant que de 4.2 mm dans l'épaisseur du pied.
+HORN_ARM_W = 5.0 + SLIDING_FIT    # 5.15 : largeur d'un bras du palonnier
+HORN_ARM_R = 10.0                 # longueur d'un bras depuis le centre
+HORN_HUB_D = SV_BOSS_D + 0.6      # 12.4 : dégage aussi le bossage du servo
+HORN_POCKET_D = 3.4               # profondeur de l'empreinte (face interne)
+HORN_RELIEF_D = 8.0               # dégagement de la vis centrale du palonnier
+HORN_RELIEF_H = 2.2
+HORN_SCREW_R = 5.0                # entraxe nominal des vis du palonnier
+HORN_SCREW_D = 2.2                # M2 passant
+HORN_SLOT_DR = 1.3                # +/- 1.3 mm d'oblong : absorbe l'incertitude
 
 # =============================================================================
 #  CARTE LILYGO T-DISPLAY S3 (TOUCH) — carte NUE, mesurée
@@ -126,6 +157,11 @@ SR_T = 15.0            # transducteurs compris
 SR_PCB_T = 1.6
 SR_CAN_D = 16.0        # Ø des capsules
 SR_CAN_PITCH = 26.0    # entraxe des 2 capsules
+# Demi-largeur de la zone à laisser TOTALEMENT libre devant le capteur : les
+# capsules Ø16 d'entraxe 26 occupent x = -21 .. +21 ; on dégage x = -16 .. +16,
+# c'est-à-dire tout l'espace ENTRE les deux capsules et leur moitié interne.
+# Au-delà (|x| > 16) le berceau peut tenir le PCB par ses bords.
+SR_FREE_HX = 16.0
 
 # =============================================================================
 #  IMPLANTATION GÉNÉRALE DU ROBOT
@@ -139,15 +175,73 @@ BODY_Z1 = 148.0                  # dessus du corps = assise de la tête
 
 BASE_Z1 = 42.0                   # haut du socle droit (au-dessus des servos)
 CORBEL_Z1 = 50.0                 # fin du raccord 45° socle -> mât
-CAV_TAPER_Z0 = 38.0              # raccord de la CAVITÉ (pente > 45°)
+# Raccord de la CAVITÉ. La pente doit rester >= 45° AUSSI dans le plan (Y, Z),
+# car body_a s'imprime couchée (axe de construction = Y) : la face avant de la
+# cavité devient alors un surplomb. De 10.4 mm en Y sur (50 - 40) = 10 mm en Z,
+# soit 46.1° — auto-portant. (v1 : 38.0 -> 40.9°, insuffisant couché.)
+CAV_TAPER_Z0 = 40.0              # raccord de la CAVITÉ (pente > 45°)
 CAV_TAPER_Z1 = 50.0
 DECK_T = WALL                    # épaisseur mini du plancher haut
 MAST_HW = 20.0                   # demi-largeur du mât
-MAST_Y0 = -18.0
+# Le DOS du mât est aligné sur le dos du socle : le corps présente ainsi une
+# face arrière PLANE unique (Y = -20) de z = 20 à z = 148. C'est cette face
+# qui sert de plateau d'impression à la moitié arrière (body_b).
+MAST_Y0 = BODY_Y0                # -20.0 (v1 : -18.0)
 MAST_Y1 = 2.0
 HEAD_HW = 33.0                   # demi-largeur de l'épaulement porte-carte
 FLARE_Z0 = 94.0                  # début de l'évasement 45°
 FLARE_Z1 = FLARE_Z0 + (HEAD_HW - MAST_HW)   # 107.0 : pente exactement 45°
+
+# =============================================================================
+#  PLAN DE JOINT AVANT / ARRIÈRE — le corps est livré en DEUX moitiés
+#  --------------------------------------------------------------------------
+#  Le joint est le plan Y = MAST_Y1 - WALL = -0.4, c'est-à-dire la FACE
+#  INTERNE de la paroi avant du mât et du caisson. C'est le SEUL plan qui donne
+#  à chacune des deux moitiés une grande face rigoureusement plane à poser sur
+#  le plateau, cavités ouvertes vers le haut :
+#    body_a (AVANT)   : posée SUR LE PLAN DE JOINT (Y = -0.4), construction +Y.
+#                       Empreinte 66 x 128 mm, hauteur 11.4 mm.
+#    body_b (ARRIÈRE) : posée sur son DOS PLAN (Y = -20), construction +Y.
+#                       Empreinte 66 x 128 mm, hauteur 19.6 mm.
+#  Aucun support, aucun volume clos : chaque cavité débouche sur le joint.
+# =============================================================================
+Y_JOINT = MAST_Y1 - WALL          # -0.4
+DOWEL_D = 5.8                     # goujon venu de fonderie sur body_b
+DOWEL_BORE_D = 6.0                # alésage correspondant dans body_a (jeu 0.2)
+DOWEL_LEN = 7.6                   # longueur du goujon au-delà du joint
+ASM_PASS_D = 3.4                  # M3 passant (traverse body_b)
+ASM_PILOT_D = 2.6                 # M3 autotaraudeuse (dans body_a)
+# Plots de joint : blocs (x0, x1, z0, z1, y1) symétrisés en +/-x. y1 = extension
+# vers l'AVANT (au-delà du joint) ; le bloc part toujours du dos (BODY_Y0).
+JOINT_BOSS = [
+    (9.5, 22.4, 20.0, 26.2, Y_JOINT + DOWEL_LEN + 1.0),  # socle, SOUS les servos
+    (22.6, 30.6, 104.0, 116.0, Y_JOINT),                 # caisson, sous la carte
+]
+# Goujons CYLINDRIQUES Ø5.8 / alésages Ø6 — (x, z) symétrisés  -> 2 goujons.
+# Placés dans le gousset du berceau de carte, seule zone haute où body_a a de
+# la profondeur (paroi + gousset = 8.2 mm de matière pleine).
+JOINT_DOWELS = [(24.0, 108.5)]
+# Goujons RECTANGULAIRES au socle — (x, z_centre) symétrisés -> 2 tenons.
+# Sous les servos il ne reste que 6.4 mm de hauteur libre (z 20.0 .. 26.4) :
+# un tenon 9.0 x 2.9 y tient là où un goujon Ø6 ne tiendrait pas.
+JOINT_TENONS = [(17.5, 23.2)]
+TEN_W, TEN_H, TEN_CL = 9.0, 2.9, 0.3      # largeur X, hauteur Z, jeu total
+# Vis M3 posées PAR L'ARRIÈRE (tête sur la face arrière plane) — (x, z)
+# symétrisées -> 4 vis. Le trajet traverse de la matière PLEINE de bout en
+# bout : plancher du socle (z 20..22.4) et tablette du berceau de carte.
+JOINT_SCREWS = [(5.0, 21.2), (24.0, 112.9)]
+# Languette / rainure sur les 2 parois latérales du MÂT : là, body_a se réduit
+# à la paroi avant (2.4 mm) et ne peut pas loger de goujon. Un tenon continu
+# reprend l'alignement et le cisaillement sur toute la hauteur du mât.
+TENON_Z0, TENON_Z1 = 52.0, 92.0
+TENON_XC = MAST_HW - WALL / 2.0   # 18.8 : milieu de la paroi latérale
+TENON_W = 1.2                     # largeur du tenon
+TENON_H = 1.0                     # saillie au-delà du joint
+TENON_CL = 0.3                    # jeu de la rainure (largeur ET profondeur)
+# Fenêtres de câblage percées dans la paroi avant du caisson, DERRIÈRE la
+# carte : les fils soudés sur les pads GPIO plongent dans le caisson (17.2 mm
+# de profondeur) puis descendent par le mât. (x0, x1, z0, z1)
+CARD_WIRE_WIN = [(-24.0, -7.0, 116.0, 137.0), (17.0, 26.0, 116.0, 137.0)]
 
 # --- DÉRIVÉ : position du servo de roue (côté droit, X > 0) ----------------
 SV_PLATE_X1 = BODY_HW                    # 25.0  face extérieure de la plaque
@@ -321,6 +415,25 @@ def soustraire(cible, outils):
     for o in outils:
         booleen(cible, o, 'DIFFERENCE')
     return cible
+
+
+def dupliquer(ob, nom):
+    """Copie indépendante (mesh compris) d'un objet."""
+    cp = ob.copy()
+    cp.data = ob.data.copy()
+    cp.name = nom
+    bpy.context.collection.objects.link(cp)
+    return cp
+
+
+def secteur(nom, r, a0, a1, z0, z1, pas=2.0):
+    """Prisme en secteur angulaire (centre + arc), degrés, extrudé selon Z."""
+    n = max(3, int(round((a1 - a0) / pas)))
+    poly = [(0.0, 0.0)]
+    for i in range(n + 1):
+        a = math.radians(a0 + (a1 - a0) * i / n)
+        poly.append((r * math.cos(a), r * math.sin(a)))
+    return prisme(nom, poly, 'Z', z0, z1)
 
 
 def miroir_x(ob, nom):
@@ -534,6 +647,85 @@ def piece_roue():
 
 
 # =============================================================================
+#  PIÈCE 1bis : PIED EN ARC  (x2 identiques, aucune symétrie)
+#  Repère local identique à celui de la roue : axe = Z, z = 0 = face EXTERNE
+#  (montée en +X sur le robot), z = FOOT_W = face INTERNE, côté servo.
+#  Orientation d'impression : TELLE QU'EXPORTÉE, face externe sur le plateau.
+#  L'empreinte du palonnier et le dégagement de vis s'ouvrent donc vers le
+#  HAUT : aucun plafond, aucun support.
+#
+#  ORIENTATION ANGULAIRE : l'arc est centré sur -Y local (angle 270°) et couvre
+#  FOOT_SPAN = 200°, soit 170°..370°. Le palonnier étant monté servo AU NEUTRE
+#  (90°) avec le milieu de l'arc vers le BAS, le point de contact est
+#  exactement sous l'axe et le robot est vertical, à la même hauteur qu'avec
+#  les roues (rayon identique 32.5). Le débattement utile du servo (+/-90°)
+#  reste dans l'arc, avec 10° de marge de chaque côté.
+# =============================================================================
+FOOT_A0 = 270.0 - FOOT_SPAN / 2.0        # 170.0
+FOOT_A1 = 270.0 + FOOT_SPAN / 2.0        # 370.0
+
+
+def piece_foot_arc():
+    r_int = FOOT_R - FOOT_RIM_T          # 29.3 : intérieur de la bande
+
+    def anneau(nom, d_ext, d_int):
+        """Couronne complète, ensuite limitée au secteur de l'arc."""
+        a = cylindre(nom, d_ext, FOOT_W, 'Z', (0, 0, FOOT_W / 2.0), 128)
+        booleen(a, cylindre(nom + '_c', d_int, FOOT_W + 4 * EPS, 'Z',
+                            (0, 0, FOOT_W / 2.0), 128), 'DIFFERENCE')
+        return intersecter(nom, a, secteur(nom + '_s', FOOT_R + 6.0,
+                                           FOOT_A0, FOOT_A1, -EPS, FOOT_W + EPS))
+
+    P = [anneau('foot_arc', FOOT_R * 2.0, r_int * 2.0),          # jante pleine
+         anneau('foot_band', FOOT_BAND_R1 * 2.0, FOOT_BAND_R0 * 2.0),
+         cylindre('foot_hub', FOOT_HUB_D, FOOT_W, 'Z', (0, 0, FOOT_W / 2.0), 64)]
+    # nervures radiales : une à chaque extrémité de l'arc (elles ferment les
+    # deux flancs), les autres réparties régulièrement.
+    for i in range(FOOT_RIBS):
+        a = math.radians(FOOT_A0 + (FOOT_A1 - FOOT_A0) * i / (FOOT_RIBS - 1))
+        dx, dy = math.cos(a), math.sin(a)
+        nx, ny = -dy, dx
+        r0, r1, t = FOOT_HUB_D / 2.0 - 1.0, r_int + 0.6, FOOT_RIB_T / 2.0
+        P.append(prisme(f'foot_rib{i}',
+                        [(r0 * dx + t * nx, r0 * dy + t * ny),
+                         (r1 * dx + t * nx, r1 * dy + t * ny),
+                         (r1 * dx - t * nx, r1 * dy - t * ny),
+                         (r0 * dx - t * nx, r0 * dy - t * ny)],
+                        'Z', 0.0, FOOT_W))
+    pied = fusionner('foot_arc', P)
+
+    # --- empreinte du palonnier, ouverte vers le HAUT (face interne) ---------
+    zp = FOOT_W - HORN_POCKET_D                       # 5.6 : fond de l'empreinte
+    C = [cylindre('fa_hub_cl', HORN_HUB_D, HORN_POCKET_D + 2 * EPS, 'Z',
+                  (0, 0, zp + HORN_POCKET_D / 2.0), 64)]
+    for i, ang in enumerate((0.0, 90.0)):             # croix à 4 branches
+        a = math.radians(ang)
+        dx, dy = math.cos(a), math.sin(a)
+        nx, ny = -dy, dx
+        t = HORN_ARM_W / 2.0
+        P4 = [(HORN_ARM_R * dx + t * nx, HORN_ARM_R * dy + t * ny),
+              (-HORN_ARM_R * dx + t * nx, -HORN_ARM_R * dy + t * ny),
+              (-HORN_ARM_R * dx - t * nx, -HORN_ARM_R * dy - t * ny),
+              (HORN_ARM_R * dx - t * nx, HORN_ARM_R * dy - t * ny)]
+        C.append(prisme(f'fa_arm{i}', P4, 'Z', zp, FOOT_W + EPS))
+    # dégagement de la vis centrale M2 du palonnier (elle dépasse du moyeu)
+    C.append(cylindre('fa_relief', HORN_RELIEF_D, HORN_RELIEF_H + EPS, 'Z',
+                      (0, 0, zp - HORN_RELIEF_H / 2.0 + EPS / 2.0), 64))
+    # 2 trous OBLONGS M2 : l'entraxe exact des trous d'un palonnier SG90 varie
+    # (4.5 .. 6.0 mm du centre selon la marque) -> lumière radiale +/-1.3 mm.
+    for s in (-1, 1):
+        C.append(boite(f'fa_vis{s}',
+                       min(s * (HORN_SCREW_R - HORN_SLOT_DR),
+                           s * (HORN_SCREW_R + HORN_SLOT_DR)),
+                       max(s * (HORN_SCREW_R - HORN_SLOT_DR),
+                           s * (HORN_SCREW_R + HORN_SLOT_DR)),
+                       -HORN_SCREW_D / 2.0, HORN_SCREW_D / 2.0,
+                       -EPS, zp + EPS))
+    soustraire(pied, C)
+    return nettoyer(pied)
+
+
+# =============================================================================
 #  PIÈCE 2 : CORPS
 #  Impression DEBOUT (Z = axe de construction), sans support :
 #  toutes les parois sont verticales, tous les plafonds sont biseautés à 45°.
@@ -652,9 +844,12 @@ def piece_corps():
         for sy in PAN_SCREW_Y:
             C2.append(cylindre(f'pan_pilot{sx}{sy}', PAN_SCREW_PILOT, 14.0, 'Z',
                                (sx * PAN_SCREW_X, sy, BODY_Z1 - 5.0), 24))
-    # dégagement du corps du servo pan (il plonge dans le caisson)
+    # Dégagement du corps du servo pan (il plonge dans le caisson). La lumière
+    # est prolongée jusqu'au PLAN DE JOINT : sur body_b, imprimée couchée sur
+    # le dos, elle débouche ainsi au sommet de la pièce au lieu de se refermer
+    # par un pont de 21 mm sous le plancher de tête.
     C2.append(boite('pan_lum', SV_BCX - SV_SLOT_L / 2.0, SV_BCX + SV_SLOT_L / 2.0,
-                    PAN_Y - SV_SLOT_W / 2.0, PAN_Y + SV_SLOT_W / 2.0,
+                    PAN_Y - SV_SLOT_W / 2.0, Y_JOINT + EPS,
                     FLARE_Z1, BODY_Z1 + EPS))
 
     # -- 6) BERCEAU DE CARTE (face avant du caisson) -------------------------
@@ -710,6 +905,28 @@ def piece_corps():
                      (CARD_HW - 1.5, CARD_PCB_BACK + 0.5)],
                     'Z', CARD_Z0 - EPS, CARD_Z0 + 1.0 + EPS))
 
+    # -- 8) PLOTS DE JOINT (goujons + vis) -----------------------------------
+    # Ajoutés dans P2, donc APRÈS l'évidement des coques : ils doivent rester
+    # pleins. Chaque plot part du dos (il est ainsi porté par le plateau quand
+    # body_b est imprimée couchée) et monte jusqu'à `y1`.
+    for (bx0, bx1, bz0, bz1, by1) in JOINT_BOSS:
+        for s in (-1, 1):
+            P2.append(boite(f'joint_plot{s}_{bz0:.0f}',
+                            min(s * bx0, s * bx1), max(s * bx0, s * bx1),
+                            BODY_Y0, by1, bz0, bz1))
+
+    # -- 9) FENÊTRES DE CÂBLAGE derrière la carte ----------------------------
+    # Les pads GPIO (servos 1/2/3/10, I2C 17/18, ultrason 11/12) sont au dos de
+    # la carte : 6.2 mm de dégagement + ces deux fenêtres qui donnent sur le
+    # caisson (17.2 mm de profondeur), lui-même relié au mât puis au socle.
+    # Elles évitent les 2 appuis arrière et les 2 plots de vis de la carte.
+    for i, (wx0, wx1, wz0, wz1) in enumerate(CARD_WIRE_WIN):
+        C2.append(boite(f'card_win{i}', wx0, wx1, MAST_Y1 - WALL - EPS,
+                        MAST_Y1 + EPS, wz0, wz1))
+    # passe-fil arrière (sortie optionnelle des faisceaux hors du caisson)
+    C2.append(boite('pass_arr', -12.0, 12.0, BODY_Y0 - EPS, MAST_Y0 + WALL + EPS,
+                    108.0, 118.0))
+
     # -- assemblage ----------------------------------------------------------
     for s in (1, -1):
         # avec_fil=False : le câble sort déjà librement par la lumière, on ne
@@ -722,6 +939,86 @@ def piece_corps():
         booleen(corps, v, 'UNION')
     soustraire(corps, C2)            # 4. perçages
     return nettoyer(corps)
+
+
+# =============================================================================
+#  PIÈCE 2 : CORPS EN DEUX MOITIÉS  (body_a avant / body_b arrière)
+#  Le corps complet est construit puis tranché par le plan Y = Y_JOINT ; on
+#  ajoute ensuite ce qui appartient en propre à chaque moitié :
+#    body_a : alésages Ø6 des goujons, avant-trous M3, rainures du mât.
+#    body_b : goujons Ø5.8 venus de fonderie, tenons du mât, passages M3 +
+#             lamages de tête sur la face arrière plane.
+# =============================================================================
+def pieces_corps():
+    plein = piece_corps()
+    a = plein
+    a.name = 'body_a'
+    b = dupliquer(plein, 'body_b')
+    GD = 200.0
+    booleen(a, boite('coupe_a', -GD, GD, -GD, Y_JOINT, -GD, GD), 'DIFFERENCE')
+    booleen(b, boite('coupe_b', -GD, GD, Y_JOINT, GD, -GD, GD), 'DIFFERENCE')
+
+    # --- body_a : alésages, avant-trous, rainures ---------------------------
+    Ca = []
+    for (dx, dz) in JOINT_DOWELS:
+        for s in (-1, 1):
+            LB = DOWEL_LEN + 1.4       # 9.0 : traversant, dégage le bout conique
+            Ca.append(cylindre(f'da{s}_{dz:.0f}', DOWEL_BORE_D, LB, 'Y',
+                               (s * dx, Y_JOINT - 0.6 + LB / 2.0, dz), 32))
+    for (tx, tz) in JOINT_TENONS:
+        for s in (-1, 1):
+            # mortaise TRAVERSANTE : ni plafond à ponter, ni volume clos
+            Ca.append(boite(f'mo{s}_{tz:.0f}',
+                            s * tx - (TEN_W + TEN_CL) / 2.0,
+                            s * tx + (TEN_W + TEN_CL) / 2.0,
+                            Y_JOINT - EPS, Y_JOINT + DOWEL_LEN + 1.1,
+                            tz - (TEN_H + TEN_CL) / 2.0,
+                            tz + (TEN_H + TEN_CL) / 2.0))
+    for (sx, sz) in JOINT_SCREWS:
+        for s in (-1, 1):
+            Ca.append(cylindre(f'pa{s}_{sz:.0f}', ASM_PILOT_D, 9.0, 'Y',
+                               (s * sx, Y_JOINT - 0.5 + 4.5, sz), 24))
+    for s in (-1, 1):
+        Ca.append(boite(f'rainure{s}',
+                        s * TENON_XC - (TENON_W + TENON_CL) / 2.0,
+                        s * TENON_XC + (TENON_W + TENON_CL) / 2.0,
+                        Y_JOINT - EPS, Y_JOINT + TENON_H + TENON_CL,
+                        TENON_Z0 - TENON_CL, TENON_Z1 + TENON_CL))
+    soustraire(a, Ca)
+    nettoyer(a)
+
+    # --- body_b : goujons, tenons, passages de vis --------------------------
+    Pb = []
+    L = 3.4 + DOWEL_LEN - 0.8          # 10.2 : ancrage 3.4 + saillie 6.8
+    for (dx, dz) in JOINT_DOWELS:
+        for s in (-1, 1):
+            Pb.append(cylindre(f'db{s}_{dz:.0f}', DOWEL_D, L, 'Y',
+                               (s * dx, Y_JOINT - 3.4 + L / 2.0, dz), 32))
+            # Bout tronconique : entrée sans forcer dans l'alésage Ø6. Il
+            # CHEVAUCHE le cylindre de 0.2 mm — deux faces Ø5.8 exactement
+            # coplanaires donneraient 32 arêtes non-manifold par goujon.
+            Pb.append(frustum(f'dc{s}_{dz:.0f}', DOWEL_D, DOWEL_D - 1.6, 1.2, 'Y',
+                              (s * dx, Y_JOINT - 3.4 + L - 0.2 + 0.6, dz), 32))
+    for (tx, tz) in JOINT_TENONS:
+        for s in (-1, 1):
+            Pb.append(boite(f'te{s}_{tz:.0f}',
+                            s * tx - TEN_W / 2.0, s * tx + TEN_W / 2.0,
+                            Y_JOINT - 3.4, Y_JOINT + DOWEL_LEN - 0.8,
+                            tz - TEN_H / 2.0, tz + TEN_H / 2.0))
+    for s in (-1, 1):
+        Pb.append(boite(f'tenon{s}',
+                        s * TENON_XC - TENON_W / 2.0, s * TENON_XC + TENON_W / 2.0,
+                        Y_JOINT - 1.0, Y_JOINT + TENON_H, TENON_Z0, TENON_Z1))
+    for o in Pb:
+        booleen(b, o, 'UNION')
+    Cb = []
+    for (sx, sz) in JOINT_SCREWS:
+        for s in (-1, 1):
+            Cb.append(cylindre(f'pb{s}_{sz:.0f}', ASM_PASS_D, 24.0, 'Y',
+                               (s * sx, BODY_Y0 - 0.1 + 12.0, sz), 24))
+    soustraire(b, Cb)
+    nettoyer(b)
+    return [a, b]
 
 
 # =============================================================================
@@ -837,7 +1134,13 @@ def piece_sensor():
         P.append(boite(f'sm_joue{s}', s * bw, s * (bw + WALL), dos_y0,
                        pcb_y1 + 1.2, -bh - WALL, bh + WALL))
     P.append(boite('sm_bas', -bw, bw, dos_y0, pcb_y1 + 1.2, -bh - WALL, -bh))
-    P.append(boite('sm_haut', -bw, bw, dos_y0, pcb_y1 + 1.2, bh, bh + WALL))
+    # RAIL HAUT : limité aux BORDS LATÉRAUX (|x| >= SR_FREE_HX). La barre pleine
+    # de la v1 passait au-dessus des deux capsules et devant elles ; le champ
+    # des transducteurs doit rester libre de bout en bout vers +Y. Le PCB n'est
+    # donc plus retenu que par le dos, le rail bas et les deux bords latéraux.
+    for s in (-1, 1):
+        xa, xb = sorted((s * SR_FREE_HX, s * bw))
+        P.append(boite(f'sm_haut{s}', xa, xb, dos_y0, pcb_y1 + 1.2, bh, bh + WALL))
     # Moyeu central AU DOS : reçoit à gauche l'axe du servo de tangage et à
     # droite le tourillon. Axe à Y = -2 (donc entièrement derrière le dos, la
     # partie qui déborderait dans la baie est retirée par sm_log).
@@ -853,11 +1156,16 @@ def piece_sensor():
 
     C = []
     # biseau 45° sous le rail haut : supprime le plafond horizontal
-    C.append(prisme('sm_biseau',
-                    [(pcb_y1 + 1.2 + EPS, bh - EPS),
-                     (pcb_y1 + 1.2 + EPS, bh + WALL),
-                     (pcb_y1 + 1.2 - WALL, bh - EPS)],
-                    'X', -bw, bw))
+    for s in (-1, 1):
+        xa, xb = sorted((s * SR_FREE_HX, s * bw))
+        C.append(prisme(f'sm_biseau{s}',
+                        [(pcb_y1 + 1.2 + EPS, bh - EPS),
+                         (pcb_y1 + 1.2 + EPS, bh + WALL),
+                         (pcb_y1 + 1.2 - WALL, bh - EPS)],
+                        'X', xa, xb))
+    # garantie « champ libre » : rien au-dessus ni entre les capsules
+    C.append(boite('sm_champ', -SR_FREE_HX, SR_FREE_HX, dos_y1 - EPS, 40.0,
+                   bh - EPS, bh + WALL + EPS))
     # Baie du capteur, dégagée de bout en bout vers l'AVANT : retire aussi la
     # part du moyeu qui déborderait devant le dos.
     C.append(boite('sm_log', -bw, bw, dos_y1 - EPS, 40.0, -bh, bh))
@@ -978,7 +1286,8 @@ def rendu(chemin):
     soleil.data.angle = math.radians(3.0)          # pénombre douce
     soleil.rotation_euler = (math.radians(52), 0.0, math.radians(-38))
 
-    couleurs = {'body': (0.16, 0.42, 0.78, 1), 'wheel': (0.82, 0.32, 0.17, 1),
+    couleurs = {'body_a': (0.16, 0.42, 0.78, 1), 'body_b': (0.24, 0.58, 0.90, 1),
+                'foot_arc': (0.82, 0.32, 0.17, 1),
                 'head_pan': (0.20, 0.64, 0.38, 1), 'head_tilt': (0.90, 0.70, 0.16, 1),
                 'sensor_mount': (0.62, 0.34, 0.74, 1)}
     for nom, ob in PARTS.items():
@@ -1086,15 +1395,15 @@ def main():
     print(f"  MPU6050     : à {AXLE_Z - (AXLE_Z - MPU_T - 4.5):.1f} mm "
           f"sous l'axe des roues, sur l'axe médian")
 
-    constructeurs = [('body', piece_corps), ('wheel', piece_roue),
-                     ('head_pan', piece_head_pan), ('head_tilt', piece_head_tilt),
-                     ('sensor_mount', piece_sensor)]
+    # `wheel` est OBSOLÈTE (servos 180° standard) : elle n'est plus exportée.
+    constructeurs = [pieces_corps, piece_foot_arc, piece_head_pan,
+                     piece_head_tilt, piece_sensor]
     print("\n--- pièces ---")
-    for nom, fn in constructeurs:
-        ob = fn()
-        ob.name = nom
-        PARTS[nom] = ob
-        exporter(ob, os.path.join(ICI, nom + '.stl'))
+    for fn in constructeurs:
+        res = fn()
+        for ob in (res if isinstance(res, (list, tuple)) else [res]):
+            PARTS[ob.name] = ob
+            exporter(ob, os.path.join(ICI, ob.name + '.stl'))
 
     if '--no-preview' not in argv:
         print("\n--- rendu ---")

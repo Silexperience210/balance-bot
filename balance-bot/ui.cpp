@@ -114,7 +114,7 @@ static int  g_lastObs = -1;
 static int  g_lastState = -1;
 static const char* g_lastMode = "";
 static bool g_lastWarn = false;
-static char g_statusLine[32] = "";
+static bool g_lastArmed = false;   // état ARMÉ dessiné sur le bouton 4
 
 // ── Helpers de rendu ───────────────────────────────────────────────
 
@@ -127,12 +127,17 @@ static void updateLabel(int x, int y, int w, const char* s, uint16_t color) {
   g_tft.print(s);
 }
 
-// Redessine le bouton i en entier
+// Redessine le bouton i en entier.
+// Le bouton 4 reflète l'état ARMÉ (Balance::isEnabled()) et NON
+// g_state.balancing : ce dernier retombe à false à chaque chute alors que
+// l'asservissement reste armé — le bouton affichait alors « EQUIL. » et
+// un appui RÉ-ARMAIT au lieu de couper (STOP inopérant).
 static void drawButton(int i) {
   TouchZone& z = g_zones[i];
   bool on = z.pressed;
+  const bool armed = Balance::isEnabled();
   uint16_t col;
-  if (i == 4) col = on ? C_ORANGE : (g_state.balancing ? C_GREEN : C_DARK);
+  if (i == 4) col = on ? C_ORANGE : (armed ? C_GREEN : C_DARK);
   else        col = on ? C_ORANGE : C_DARK;
 
   g_tft.fillRoundRect(z.x, z.y, z.w, z.h, 8, col);
@@ -147,11 +152,12 @@ static void drawButton(int i) {
   else if (i == 3) g_tft.fillTriangle(cx - 8, cy - 12, cx - 8, cy + 12, cx + 12, cy, glyph);
   else {
     g_tft.setTextDatum(MC_DATUM);
-    g_tft.setTextColor(on || !g_state.balancing ? C_TEXT : C_BG, col);
+    g_tft.setTextColor(on || !armed ? C_TEXT : C_BG, col);
     g_tft.setTextSize(2);  // 6 car. × 12 px = 72 px < 100 px de large
-    g_tft.drawString(g_state.balancing ? "STOP" : "EQUIL.", cx, cy);
+    g_tft.drawString(armed ? "STOP" : "EQUIL.", cx, cy);
     g_tft.setTextSize(1);
     g_tft.setTextDatum(TL_DATUM);
+    g_lastArmed = armed;
   }
   z.renderedPressed = on;
 }
@@ -183,12 +189,6 @@ static void drawStatic() {
   g_tft.drawString("0.00 V", 48, 44);
   g_tft.drawString("--", 206, 32);
   g_tft.drawString("MANUEL", 206, 44);
-
-  // Ligne d'état
-  if (g_statusLine[0]) {
-    g_tft.setTextColor(C_ORANGE, C_BG);
-    g_tft.drawString(g_statusLine, 6, 54);
-  }
 
   // Boutons
   for (int i = 0; i < g_zoneCount; i++) drawButton(i);
@@ -239,6 +239,11 @@ void Ui::loop() {
   }
 
   // ── 2. Zones : front montant / relâchement ─────────────────────
+  // On mémorise si une zone DIRECTIONNELLE est effectivement tenue : le
+  // relâchement d'une commande, c'est « plus aucun bouton sous le doigt »,
+  // pas « plus de doigt sur l'écran ». Sinon un doigt qui glisse hors du
+  // bouton en restant posé laissait cmdForward/cmdTurn bloqués.
+  bool dirHeld = false;
   for (int i = 0; i < g_zoneCount; i++) {
     TouchZone& z = g_zones[i];
     bool inZone = g_touchedRaw &&
@@ -250,6 +255,7 @@ void Ui::loop() {
     } else if (!inZone) {
       z.pressed = false;
     }
+    if (inZone && i < 4) dirHeld = true;
   }
 
   // ── 3. Actions (front montant) ─────────────────────────────────
@@ -261,35 +267,42 @@ void Ui::loop() {
       else if (i == 2) { g_state.cmdForward = 0; g_state.cmdTurn = -100; }
       else if (i == 3) { g_state.cmdForward = 0; g_state.cmdTurn = 100; }
       else if (i == 4) {
-        g_state.balancing = !g_state.balancing;
-        Balance::setEnabled(g_state.balancing);
+        // Bascule sur l'état ARMÉ réel. setEnabled(false) coupe tout
+        // (halt + roues au neutre) et le verrou tient : Balance::loop()
+        // sort immédiatement tant que l'utilisateur n'a pas ré-armé.
+        const bool armed = Balance::isEnabled();
+        Balance::setEnabled(!armed);
+        g_state.cmdForward = 0;
+        g_state.cmdTurn = 0;
       }
       z.lastPressed = false;
     }
   }
 
-  // Retour au neutre quand plus rien n'est tenu
-  if (!g_touchedRaw) {
-    if (g_state.cmdForward != 0 || g_state.cmdTurn != 0) {
-      bool held = false;
-      for (int i = 0; i < 4; i++) if (g_zones[i].pressed) held = true;
-      if (!held) { g_state.cmdForward = 0; g_state.cmdTurn = 0; }
-    }
+  // Retour au neutre dès qu'aucune flèche n'est sous le doigt
+  if (!dirHeld && (g_state.cmdForward != 0 || g_state.cmdTurn != 0)) {
+    g_state.cmdForward = 0;
+    g_state.cmdTurn = 0;
   }
 
   // ── 4. Rendu incrémental ───────────────────────────────────────
 
-  // 4a. Boutons dont l'état pressé a changé
+  // 4a. Boutons dont l'état pressé a changé (+ bouton 4 si l'armement
+  // a changé ailleurs qu'à l'appui : sécurité, ré-arme auto, etc.)
   for (int i = 0; i < g_zoneCount; i++) {
     if (g_zones[i].pressed != g_zones[i].renderedPressed) drawButton(i);
   }
+  if (Balance::isEnabled() != g_lastArmed) drawButton(4);
 
   // 4b. Télémétrie
   int pitch = static_cast<int>(g_state.pitchDeg * 10);
   if (pitch != g_lastPitch) {
     g_lastPitch = pitch;
     char b[16];
-    snprintf(b, sizeof(b), "%d.%d deg", pitch / 10, abs(pitch % 10));
+    // Signe explicite : pitch/10 vaut 0 entre -0.9° et -0.1°, le « - »
+    // serait perdu (−0,5° affiché « 0.5 deg »).
+    snprintf(b, sizeof(b), "%s%d.%d deg", (pitch < 0 && pitch > -10) ? "-" : "",
+             pitch / 10, abs(pitch % 10));
     updateLabel(48, 32, 76, b, C_TEXT);
   }
 
@@ -297,8 +310,12 @@ void Ui::loop() {
   if (bat != g_lastBat) {
     g_lastBat = bat;
     char b[16];
-    snprintf(b, sizeof(b), "%.2f V", bat);
-    updateLabel(48, 44, 76, b, C_TEXT);
+    // batteryV < 0 = aucune batterie plausible (alimentation USB seule) :
+    // à distinguer d'une batterie réellement à plat.
+    if (bat < 0.0f) snprintf(b, sizeof(b), "USB");
+    else            snprintf(b, sizeof(b), "%.2f V", bat);
+    updateLabel(48, 44, 76, b,
+                bat < 0.0f ? C_DARK : (g_state.batteryLow ? C_RED : C_TEXT));
   }
 
   int obs = static_cast<int>(g_state.obstacleCm);
@@ -311,25 +328,28 @@ void Ui::loop() {
   }
 
   // 4c. Mode
-  const char* mode = g_state.cmdEnabled ? "AUTO" : "MANUEL";
+  const char* mode = Balance::isEnabled() ? "AUTO" : "MANUEL";
   if (strcmp(mode, g_lastMode) != 0) {
     g_lastMode = mode;
     updateLabel(206, 44, 60, mode, C_TEXT);
   }
 
-  // 4d. État principal
+  // 4d. État principal — « CHUTE » signale la VRAIE chute (verrou de
+  // Balance), pas un obstacle : l'obstacle a son propre état « OBST. ».
   int state = 0;
-  if (g_state.balancing) state = 1;
-  else if (g_state.obstacleWarn) state = 2;
-  else if (g_state.cmdEnabled) state = 3;
+  if (Balance::isEnabled() && Balance::isFallen()) state = 2;
+  else if (g_state.obstacleWarn) state = 4;
+  else if (g_state.balancing)    state = 1;
+  else if (Balance::isEnabled()) state = 3;
   if (state != g_lastState) {
     g_lastState = state;
     const char* s = "IDLE";
     uint16_t col = C_DARK;
     switch (state) {
-      case 1: s = "BALANCING"; col = C_GREEN; break;
-      case 2: s = "CHUTE";     col = C_RED;   break;
-      case 3: s = "DEMO";      col = C_ORANGE; break;
+      case 1: s = "BALANCING"; col = C_GREEN;  break;
+      case 2: s = "CHUTE";     col = C_RED;    break;
+      case 3: s = "ARME";      col = C_ORANGE; break;
+      case 4: s = "OBST.";     col = C_ORANGE; break;
     }
     updateLabel(240, 8, 74, s, col);
   }
@@ -346,19 +366,23 @@ void Ui::loop() {
       g_lastObs = -9999;  // force la re-écriture de la valeur
     }
   }
-}
 
-// ── setStatusLine() ────────────────────────────────────────────────
-void Ui::setStatusLine(const char* text) {
-  if (!text || !text[0]) return;
-  strncpy(g_statusLine, text, sizeof(g_statusLine) - 1);
-  g_statusLine[sizeof(g_statusLine) - 1] = '\0';
-
-  if (g_initialized) {
-    g_tft.fillRect(6, 54, WIDTH - 12, 9, C_BG);
-    g_tft.setTextColor(C_ORANGE, C_BG);
-    g_tft.setTextSize(1);
-    g_tft.setCursor(6, 54);
-    g_tft.print(g_statusLine);
+  // 4f. Diagnostic : fréquence réelle + pire temps UI/tête (ms).
+  // Vert = 200 Hz tenus · orange = dégradé · rouge = lent. Le « U: » et
+  // « H: » montrent qui bloque (ex. U:12 = un cycle UI a pris 12 ms).
+  {
+    static int s_lastHz = -1;
+    static uint8_t s_lastUi = 255, s_lastHead = 255;
+    int hz = static_cast<int>(g_state.balanceHz + 0.5f);
+    if (hz != s_lastHz || g_state.dbgUiMs != s_lastUi || g_state.dbgHeadMs != s_lastHead) {
+      s_lastHz = hz;
+      s_lastUi = g_state.dbgUiMs;
+      s_lastHead = g_state.dbgHeadMs;
+      uint16_t col = hz >= 180 ? C_GREEN : (hz >= 100 ? C_ORANGE : C_RED);
+      char b[24];
+      if (hz <= 0) snprintf(b, sizeof(b), "B:-- U:%u H:%u", s_lastUi, s_lastHead);
+      else         snprintf(b, sizeof(b), "B:%d U:%u H:%u", hz, s_lastUi, s_lastHead);
+      updateLabel(6, 54, 150, b, col);
+    }
   }
 }

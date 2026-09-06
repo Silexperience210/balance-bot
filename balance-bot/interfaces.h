@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>  // uint8_t etc. — certains .cpp incluent ce header avant Arduino.h
 // ═══════════════════════════════════════════════════════════════════
 // BalanceBot — interfaces inter-modules (CONTRAT — ne pas modifier)
 // Chaque module implémente ses .cpp contre CES headers. Hermes assemble
@@ -10,7 +11,11 @@ struct BotState {
   // boucle d'équilibre (module A)
   bool  balancing = false;   // vrai quand le robot tient debout
   float pitchDeg  = 0.0f;    // inclinaison mesurée
-  float batteryV  = 0.0f;    // tension batterie
+  float balanceHz = 0.0f;    // fréquence RÉELLE de la boucle d'équilibre
+  uint8_t dbgUiMs  = 0;      // pire temps d'Ui::loop (ms, dernière seconde)
+  uint8_t dbgHeadMs = 0;     // pire temps de Head::loop (ms, dernière seconde)
+  float batteryV  = 0.0f;    // tension batterie (-1 = aucune batterie plausible : USB seul)
+  bool  batteryLow = false;  // vrai si lecture valide ET sous BAT_LOW_V
   // commandes UI (module B) — consommées par la boucle d'équilibre
   int   cmdForward = 0;      // -100..+100 (vitesse avant/arrière)
   int   cmdTurn    = 0;      // -100..+100 (rotation)
@@ -32,7 +37,8 @@ namespace Balance {
   bool  begin();                 // init IMU + servos ; false si IMU absent
   void  loop();                  // 1 itération 200 Hz (appelée par le .ino)
   void  setEnabled(bool on);     // active/coupe l'asservissement
-  bool  isEnabled();
+  bool  isEnabled();             // ARMÉ (commande) — ≠ g_state.balancing (debout)
+  bool  isFallen();              // verrou de chute actif (attend le redressement)
   bool  imuOk();                 // true si MPU6050 répond
 }
 
@@ -41,7 +47,6 @@ namespace Balance {
 namespace Ui {
   bool  begin();                 // init écran + touch
   void  loop();                  // lecture tactile + rendu (appelée souvent)
-  void  setStatusLine(const char* text);  // ligne d'état libre (ex: mode)
 }
 
 // ── Module C : tête + ultrason (head.h / ultrasonic.h) ─────────────
@@ -49,11 +54,13 @@ namespace Ui {
 namespace Head {
   bool  begin();
   void  loop();                  // asservit pan/tilt + lit l'ultrason
-  void  scan();                  // déclenche un balayage 180° (mode auto)
+  // scan() supprimé : c'était un no-op appelé toutes les 500 ms. Le
+  // balayage est assuré par le mouvement continu de handleHeadMovement().
 }
 
 // ── Utilitaire batterie (battery.h — lu par UI + boucle) ───────────
 namespace Battery {
   void  begin();
-  float readVolts();             // via PIN_BAT_VOLT (ADC atténué)
+  float readVolts();             // via PIN_BAT_VOLT (ADC atténué) ; -1 si invalide
+  bool  isLow();                 // dernière lecture valide sous le seuil bas
 }

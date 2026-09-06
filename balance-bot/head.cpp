@@ -17,9 +17,8 @@ static Servo servoTilt;
 
 // Prototypes internes (membres du namespace Head, définis plus bas)
 namespace Head {
-  void measureUltrasonic();
+  bool measureUltrasonic();  // true si écho reçu (obstacle), false si timeout
   void handleHeadMovement();
-  void handleBalanceScan();
 }
 
 // Lissage ultrason : moyenne glissante
@@ -83,11 +82,17 @@ bool Head::begin() {
 
 // ── Boucle principale ───────────────────────────────────────────────
 void Head::loop() {
-  // 1. Mesure ultrason (toutes les 100ms pour ne pas saturer)
+  // 1. Mesure ultrason — cadence ADAPTATIVE pour ne pas voler du temps à
+  // la boucle d'équilibre (200 Hz) : le pulseIn est bloquant. Au repos
+  // (aucun écho : pas d'obstacle OU capteur absent) on espace à 1 s après
+  // 3 échecs consécutifs ; dès qu'un écho revient, on repasse à 200 ms.
   static unsigned long lastUsMeasureMs = 0;
-  if (millis() - lastUsMeasureMs >= 100) {
+  static int usFailStreak = 0;
+  const unsigned long interval = (usFailStreak >= 3) ? 1000UL : 200UL;
+  if (millis() - lastUsMeasureMs >= interval) {
     lastUsMeasureMs = millis();
-    measureUltrasonic();
+    if (measureUltrasonic()) usFailStreak = 0;
+    else                     usFailStreak++;
   }
 
   // 2. Gestion du balayage de tête
@@ -95,7 +100,9 @@ void Head::loop() {
 }
 
 // ── Mesure ultrason avec lissage ────────────────────────────────────
-void Head::measureUltrasonic() {
+// Mesure ultrason. Retourne true si un écho a été reçu (obstacle détecté
+// dans la portée), false si timeout (rien devant OU capteur absent).
+bool Head::measureUltrasonic() {
   // Déclenchement : impulsion 10 µs HIGH
   digitalWrite(PIN_US_TRIG, LOW);
   delayMicroseconds(2);
@@ -103,8 +110,9 @@ void Head::measureUltrasonic() {
   delayMicroseconds(10);
   digitalWrite(PIN_US_TRIG, LOW);
 
-  // Mesure ECHO : timeout 30000 µs ≈ 5m
-  unsigned long duration = pulseIn(PIN_US_ECHO, HIGH, 30000);
+  // Mesure ECHO : timeout 12000 µs ≈ 2 m (suffisant pour l'évitement d'un
+  // petit robot ; un timeout long bloquerait la boucle d'équilibre).
+  unsigned long duration = pulseIn(PIN_US_ECHO, HIGH, 12000);
 
   float distanceCm = -1.0f;
   if (duration > 0) {
@@ -128,6 +136,8 @@ void Head::measureUltrasonic() {
   if (smoothedDistance > US_MAX_CM) {
     g_state.obstacleCm = -1.0f;  // hors portée
   }
+
+  return duration > 0;
 }
 
 // ── Gestion du mouvement de la tête ─────────────────────────────────
@@ -140,11 +150,11 @@ void Head::handleHeadMovement() {
     int targetPan = 90;
     int targetTilt = 60;
 
-    // Scan périodique en mode équilibre
+    // Scan périodique en mode équilibre — le balayage est assuré par le
+    // mouvement continu de handleHeadMovement() (scan() a été supprimé).
     static unsigned long lastBalanceScanMs = 0;
     if (millis() - lastBalanceScanMs >= BALANCE_SCAN_INTERVAL_MS) {
       lastBalanceScanMs = millis();
-      scan();  // déclenche un balayage 180°
     }
 
     // Mouvement doux vers la position cible
@@ -203,11 +213,4 @@ void Head::handleHeadMovement() {
   // Appliquer les positions
   servoPan.write(g_state.headPanDeg);
   servoTilt.write(g_state.headTiltDeg);
-}
-
-// ── Déclenche un balayage 180° ─────────────────────────────────────
-void Head::scan() {
-  // En mode équilibre, le scan est géré par handleHeadMovement()
-  // Ici, on peut ajouter un scan rapide si nécessaire
-  // Pour l'instant, le balayage continu en mode démo suffit
 }

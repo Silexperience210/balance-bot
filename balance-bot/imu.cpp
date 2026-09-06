@@ -117,7 +117,10 @@ bool begin() {
   s_ok = false;
   Wire.begin(PIN_IIC_SDA, PIN_IIC_SCL);   // ESP32-S3 : pins explicites
   Wire.setClock(kI2cHz);
-  Wire.setTimeOut(10);                    // ms — jamais de blocage long
+  Wire.setTimeOut(2);                     // ms — 2 ms suffit (les esclaves I2C
+                                          // répondent en µs) ; un timeout long
+                                          // gèlerait la boucle 200 Hz si un
+                                          // contact faiblit en mouvement
 
   if      (probe(kAddrPrimary))   s_addr = kAddrPrimary;
   else if (probe(kAddrSecondary)) s_addr = kAddrSecondary;

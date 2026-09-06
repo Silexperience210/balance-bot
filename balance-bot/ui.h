@@ -12,7 +12,4 @@ namespace Ui {
 
   // Boucle principale : lecture tactile + rendu (appelée souvent)
   void  loop();
-
-  // Affiche une ligne d'état libre dans le footer
-  void  setStatusLine(const char* text);
 }

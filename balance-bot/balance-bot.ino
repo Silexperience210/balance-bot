@@ -38,26 +38,50 @@ void setup() {
 }
 
 void loop() {
-  // Boucle d'équilibre : cadencée à BALANCE_LOOP_HZ (200 Hz)
-  static unsigned long lastBalance = 0;
-  if (g_state.balancing || Balance::isEnabled()) {
-    unsigned long now = millis();
-    if (now - lastBalance >= (1000UL / BALANCE_LOOP_HZ)) {
-      lastBalance = now;
-      Balance::loop();
-    }
+  const unsigned long nowMs = millis();
+
+  // ── Boucle d'équilibre : 200 Hz ─────────────────────────────────
+  // Toujours active même à l'arrêt : Balance::loop() mesure l'IMU en
+  // continu (le PITCH affiché vit même sans équilibre) et ne pilote les
+  // roues que si l'équilibre est activé.
+  static unsigned long tBalance = 0;
+  if (nowMs - tBalance >= (1000UL / BALANCE_LOOP_HZ)) {
+    tBalance = nowMs;
+    Balance::loop();
   }
 
-  // UI : rafraîchie en continu (touch + rendu)
-  Ui::loop();
+  // ── UI : 60 Hz (au lieu de « en continu ») ───────────────────────
+  // Le touch CST816 partage le bus I2C avec le MPU6050. Le lire à chaque
+  // itération de loop() (des milliers de fois/s) monopolise le bus et
+  // dégrade la boucle d'équilibre. 60 Hz = latence tactile < 17 ms,
+  // largement suffisant, et le bus respire.
+  static unsigned long tUi = 0;
+  if (nowMs - tUi >= 16) {
+    tUi = nowMs;
+    unsigned long t0 = micros();
+    Ui::loop();
+    unsigned long dt = (micros() - t0) / 1000UL;  // ms arrondi bas
+    if (dt > g_state.dbgUiMs) g_state.dbgUiMs = (uint8_t)min(dt, 255UL);
+  }
 
-  // Tête + ultrason : balayage/évitement
-  Head::loop();
+  // ── Tête + ultrason : 50 Hz (l'ultrason est auto-cadencé à 10 Hz
+  // en interne ; 50 Hz de mouvement pan/tilt est fluide pour des SG90) ──
+  static unsigned long tHead = 0;
+  if (nowMs - tHead >= 20) {
+    tHead = nowMs;
+    unsigned long t0 = micros();
+    Head::loop();
+    unsigned long dt = (micros() - t0) / 1000UL;
+    if (dt > g_state.dbgHeadMs) g_state.dbgHeadMs = (uint8_t)min(dt, 255UL);
+  }
 
   // Batterie : lecture 1×/seconde (état global pour l'UI)
-  static unsigned long lastBatMs = 0;
-  if (millis() - lastBatMs >= 1000) {
-    lastBatMs = millis();
+  static unsigned long tBat = 0;
+  if (nowMs - tBat >= 1000) {
+    tBat = nowMs;
     g_state.batteryV = Battery::readVolts();
+    // Fenêtre de debug écoulée : on repart de zéro pour la seconde suivante
+    g_state.dbgUiMs = 0;
+    g_state.dbgHeadMs = 0;
   }
 }

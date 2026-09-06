@@ -158,8 +158,26 @@ bool begin() {
 }
 
 void loop() {
-  // Le .ino n'appelle loop() que si isEnabled() ; on revérifie ici pour
-  // rester correct quel que soit l'appelant.
+  // Le .ino appelle loop() en continu (200 Hz). L'asservissement ne
+  // s'active que si isEnabled(), mais la MESURE IMU a toujours lieu :
+  // le PITCH affiché par l'UI doit vivre même robot posé à l'arrêt.
+
+  // ── Fréquence RÉELLE d'appel (debug UI) ─────────────────────────
+  // Compte les appels sur une fenêtre glissante de 1 s. Si l'UI ou la
+  // tête (mêmes ressources I2C/CPU) ralentissent la loop, on le voit ici.
+  {
+    static unsigned long s_count = 0;
+    static unsigned long s_winMs = millis();
+    s_count++;
+    const unsigned long nowMs = millis();
+    const unsigned long span = nowMs - s_winMs;
+    if (span >= 1000) {
+      g_state.balanceHz = s_count * 1000.0f / (float)span;
+      s_count = 0;
+      s_winMs = nowMs;
+    }
+  }
+
   const bool want = isEnabled();
   if (!s_enabled && want) {          // front montant : on repart propre
     s_pid.reset();
@@ -168,7 +186,7 @@ void loop() {
   }
   s_enabled = want;
 
-  if (!s_imuOk || !s_enabled) {
+  if (!s_imuOk) {
     halt();
     return;
   }
@@ -184,6 +202,10 @@ void loop() {
   const float pitch = Imu::pitchDeg();
   const float rate  = Imu::pitchRateDps();
   g_state.pitchDeg  = pitch;
+
+  // À l'arrêt (équilibre OFF) : on a mesuré pour l'affichage, on ne
+  // pilote rien. Pas de halt() non plus : roues déjà au neutre.
+  if (!s_enabled) return;
 
   // ── Sécurité : chute ─────────────────────────────────────────────
   if (fabsf(pitch) > kFallAngleDeg) {
@@ -256,6 +278,11 @@ void setEnabled(bool on) {
 // passer par setEnabled() : les deux sources sont acceptées, sinon le
 // .ino n'appellerait jamais loop().
 bool isEnabled() { return s_enabled || g_state.cmdEnabled; }
+
+// Verrou de chute : vrai tant que le robot n'a pas été redressé et tenu
+// vertical kRecoverHoldMs. L'UI s'en sert pour afficher « CHUTE » (et
+// pour ne PAS confondre avec un simple obstacle).
+bool isFallen() { return s_fallen; }
 
 bool imuOk() { return s_imuOk; }
 
