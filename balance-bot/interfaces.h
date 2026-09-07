@@ -43,6 +43,20 @@ namespace Balance {
   bool  isEnabled();             // ARMÉ (commande) — ≠ g_state.balancing (debout)
   bool  isFallen();              // verrou de chute actif (attend le redressement)
   bool  imuOk();                 // true si MPU6050 répond
+  // Réglage à chaud (module D — banc web). Ajout non intrusif : la boucle
+  // d'équilibre lit simplement des variables au lieu de constantes.
+  void  setGains(float kp, float ki, float kd);  // bornés 0-100 / 0-2000 / 0-20
+  void  getGains(float& kp, float& ki, float& kd);
+  float pitchRateDps();          // dernière vitesse gyro (°/s) — télémétrie
+}
+
+// ── Module D : banc de réglage web (tuner.h) ───────────────────────
+// Point d'accès WiFi + serveur HTTP pour régler le PID sans reflasher.
+// Entièrement inerte tant qu'aucun client ne sollicite le serveur.
+namespace Tuner {
+  bool  begin();                 // ouvre l'AP « BalanceBot-Tune » ; false si échec
+  void  loop();                  // sert au plus une requête (no-op si !begin())
+  bool  active();                // true si un client a dialogué récemment
 }
 
 // ── Module B : UI tactile (ui.h) ───────────────────────────────────

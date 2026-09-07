@@ -36,11 +36,10 @@ le corps vers l'avant de ~10° à la main :
 - **Mauvais signe** : les pieds partent en arrière → couper STOP immédiatement,
   inverser le signe (voir note ci-dessous)
 Note : « avant » = le sens où le haut du robot penche. Si mauvais signe,
-les options : inverser `kDirL/kDirR` (les 2), OU retourner le MPU6050 de 180°
-(le pitch change de signe), OU échanger les fils SDA/SCL... non, ne pas faire
-ça. Le plus propre : `kDirL/R` + commentaire, ou le firmware a
-`balance.cpp` : la sortie `out` → `Feet::driveFootSpeed` — si le signe est
-globalement faux, multiplier par −1 au seul endroit de l'appel (documenter).
+corriger par UN SEUL patch : `kAccelPitchSign` dans imu.cpp (section RÉGLAGE
+MÉCANIQUE, ligne ~46) — +1 → −1 (ou l'inverse). C'est le correctif global
+(équivalent à inverser kDirL ET kDirR, mais en 1 constante). Ne pas toucher
+aux servos si le signe est le même sur les deux pieds.
 
 ### 4. Équilibre tenu (robot maintenu)
 Tenir le robot droit à la main (pieds au sol), activer EQUIL. Sentir les

@@ -10,6 +10,7 @@
 
 #include "config.h"
 #include "interfaces.h"
+#include "tuner.h"
 
 // État global unique — défini ICI, déclaré extern dans interfaces.h
 BotState g_state;
@@ -33,6 +34,11 @@ void setup() {
 
   if (Head::begin())    Serial.println("TÊTE+US   : OK");
   else                  Serial.println("TÊTE+US   : ÉCHEC");
+
+  // Banc de réglage web (AP « BalanceBot-Tune » → http://192.168.4.1).
+  // Un échec n'empêche pas le boot : Tuner::loop() devient un no-op et
+  // le robot se comporte exactement comme sans ce module.
+  Tuner::begin();
 
   Serial.println("═══ BalanceBot prêt ═══");
 }
@@ -73,6 +79,15 @@ void loop() {
     Head::loop();
     unsigned long dt = (micros() - t0) / 1000UL;
     if (dt > g_state.dbgHeadMs) g_state.dbgHeadMs = (uint8_t)min(dt, 255UL);
+  }
+
+  // ── Banc de réglage web : au plus 20 Hz (cadencé dans Tuner::loop) ──
+  // Priorité absolue à l'équilibre : quand le robot tient debout, on ne
+  // sert le web que si le dernier échange date de plus de 100 ms — assez
+  // pour laisser passer la télémétrie (le navigateur interroge toutes
+  // les 150 ms) sans jamais enchaîner deux requêtes en pleine correction.
+  if (!g_state.balancing || nowMs - Tuner::lastRequestMs() > 100) {
+    Tuner::loop();
   }
 
   // Batterie : lecture 1×/seconde (état global pour l'UI)

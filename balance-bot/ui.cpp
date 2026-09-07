@@ -296,6 +296,17 @@ void Ui::loop() {
   }
   if (Balance::isEnabled() != g_lastArmed) drawButton(4);
 
+  // 4a bis. Voyant du banc de réglage web : « WEB » vert dès qu'un
+  // téléphone dialogue avec la carte (droite du titre, avant « IDLE »).
+  {
+    static int s_lastWeb = -1;
+    const int web = Tuner::active() ? 1 : 0;
+    if (web != s_lastWeb) {
+      s_lastWeb = web;
+      updateLabel(136, 8, 20, web ? "WEB" : "", C_GREEN);
+    }
+  }
+
   // 4b. Télémétrie
   int pitch = static_cast<int>(g_state.pitchDeg * 10);
   if (pitch != g_lastPitch) {

@@ -51,9 +51,19 @@ namespace {
 // de contact rattrape le CoM ; en dessous, le robot tombe quelle que
 // soit la valeur de Kp. L'ancien Ki = 20 (hérité du design « roues »,
 // jamais testé) est 15× trop faible → chute systématique en sim.
-constexpr float kKp = 25.0f;   // vitesse par degré d'erreur
-constexpr float kKi = 500.0f;  // vitesse par (degré · seconde) — cf. Ki > g/R
-constexpr float kKd = 0.5f;    // vitesse par (degré / seconde) — sur le gyro
+// NON-const : réglables à chaud par le banc web (tuner.cpp) via
+// Balance::setGains(). Des float 32 bits sur ESP32 : lecture/écriture
+// atomiques (un seul mot machine), pas de tearing possible entre la
+// boucle d'équilibre et le serveur web — ni volatile ni mutex requis.
+// Les valeurs ci-dessous restent les valeurs validées en simulation.
+float kKp = 25.0f;   // vitesse par degré d'erreur
+float kKi = 500.0f;  // vitesse par (degré · seconde) — cf. Ki > g/R
+float kKd = 0.5f;    // vitesse par (degré / seconde) — sur le gyro
+
+// Bornes de réglage à chaud (garde-fous du banc web)
+constexpr float kKpMax = 100.0f;
+constexpr float kKiMax = 2000.0f;
+constexpr float kKdMax = 20.0f;
 
 // Consigne d'équilibre : angle auquel le robot tient réellement debout.
 // Décaler de quelques dixièmes si le robot dérive toujours du même côté.
@@ -172,6 +182,7 @@ bool  s_imuOk     = false;
 bool  s_fallen    = false;         // verrou de chute (le robot ne se débat pas)
 float s_fwdSmooth = 0.0f;          // consignes UI lissées
 float s_turnSmooth= 0.0f;
+float s_lastRateDps = 0.0f;        // dernière vitesse gyro (télémétrie web)
 unsigned long s_lastMicros   = 0;
 unsigned long s_uprightSince = 0;  // début de la fenêtre de redressement
 
@@ -357,6 +368,7 @@ void loop() {
   const float pitch = Imu::pitchDeg();
   const float rate  = Imu::pitchRateDps();
   g_state.pitchDeg  = pitch;
+  s_lastRateDps     = rate;          // exposé au banc web (télémétrie seule)
 
   // À l'arrêt (équilibre OFF) : on a mesuré pour l'affichage, on ne
   // pilote pas l'équilibre — seul le mode démo peut bouger les pieds.
@@ -481,5 +493,21 @@ bool isEnabled() { return s_enabled || g_state.cmdEnabled; }
 bool isFallen() { return s_fallen; }
 
 bool imuOk() { return s_imuOk; }
+
+// ── Réglage à chaud des gains (banc web — tuner.cpp) ───────────────
+// Bornées : une valeur aberrante envoyée depuis le téléphone (doigt qui
+// dérape, requête tronquée) ne doit pas pouvoir faire diverger le PID.
+// NaN → gain laissé inchangé (constrain() ne filtre pas les NaN).
+void setGains(float kp, float ki, float kd) {
+  if (!isnan(kp)) kKp = constrain(kp, 0.0f, kKpMax);
+  if (!isnan(ki)) kKi = constrain(ki, 0.0f, kKiMax);
+  if (!isnan(kd)) kKd = constrain(kd, 0.0f, kKdMax);
+}
+
+void getGains(float& kp, float& ki, float& kd) {
+  kp = kKp;  ki = kKi;  kd = kKd;
+}
+
+float pitchRateDps() { return s_lastRateDps; }
 
 } // namespace Balance
