@@ -47,6 +47,9 @@ namespace Balance {
   // d'équilibre lit simplement des variables au lieu de constantes.
   void  setGains(float kp, float ki, float kd);  // bornés 0-100 / 0-2000 / 0-20
   void  getGains(float& kp, float& ki, float& kd);
+  // Cascade de recentrage des pieds (position φ → vitesse → θ_ref).
+  void  setRecenterGains(float kpPhi, float kv);  // bornés 0-5 / 0-20
+  void  getRecenterGains(float& kpPhi, float& kv);
   float pitchRateDps();          // dernière vitesse gyro (°/s) — télémétrie
 }
 

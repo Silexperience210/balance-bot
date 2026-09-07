@@ -10,15 +10,15 @@
 //                                        ▲                    │
 //                    cmdForward (UI) ────┘                    ▼
 //                    cmdTurn    (UI) ─────► différentiel   Feet:: (position)
-//                    recentrage  ─────────┘  (θ_ref lent)
+//                    cascade φ  ──────────┘  (θ_ref)
 //
 // MÉCANIQUE v2 : plus de roues, deux PIEDS EN ARC sur SG90 standard.
 // Un servo de position a un DÉBATTEMENT FINI : le PID ne peut plus
 // tourner indéfiniment. Deux mécanismes s'ajoutent donc ici :
 //   · un soft clamp qui annule la vitesse AVANT la butée ;
-//   · une boucle de recentrage lente (2 Hz) qui incline légèrement la
-//     consigne pour faire rouler le robot et ramener les pieds vers 0
-//     (le « marcher sur place »). Elle ne court-circuite JAMAIS le PID.
+//   · une CASCADE DE RECENTRAGE en vitesse (boucle externe 10 Hz sur la
+//     position de pied φ → consigne de vitesse ; boucle interne continue
+//     → θ_ref). Elle ne court-circuite JAMAIS le PID.
 //
 // Cadencé à BALANCE_LOOP_HZ (200 Hz) par le .ino ; aucun delay() ici.
 // ═══════════════════════════════════════════════════════════════════
@@ -106,26 +106,35 @@ constexpr float kFootHardDeg   = 45.0f;   // = butée dure de feet.cpp
 // une coupure franche exciterait le pendule.
 constexpr float kFootTaperDeg  = 10.0f;
 
-// ── Boucle de recentrage (« marcher sur place ») ───────────────────
-// Si les pieds dérivent, on incline très légèrement la consigne dans
-// le sens OPPOSÉ : le robot roule dans cette direction et les pieds
-// reviennent vers 0. Cadence 2 Hz — plusieurs décades sous le PID, qui
-// garde donc toujours l'autorité sur l'équilibre.
+// ── Recentrage en CASCADE (remplace le trim d'angle) ───────────────
+// Le trim précédent (±0.4° sur θ_ref) était trop faible : après une tape
+// qui laissait le pied à 36°, le robot restait collé près de la butée et
+// tombait à la perturbation suivante. On asservit désormais la POSITION
+// du pied par une cascade classique :
 //
-// Valeurs ADOUCIES pour le premier essai debout (cf. sim_recentrage3.png) :
-// un balancebot penché de θ ACCÉLÈRE (a ≈ g·θ), il ne roule pas à vitesse
-// constante — un trim de ±1° lance déjà le robot à ~0.17 m/s². Pendant un
-// transitoire, ce trim s'oppose au rattrapage du PID et pousse le pied
-// vers la butée au lieu de l'en éloigner. On garde donc une autorité
-// minuscule et très lente : le recentrage ne doit corriger qu'une dérive
-// installée, jamais participer à l'équilibre.
-constexpr unsigned long kRecenterPeriodMs = 500;   // 2 Hz
-constexpr float        kRecenterDeadDeg  = 12.0f;  // en deçà : rien à faire
-constexpr unsigned long kRecenterHoldMs  = 800;    // …et il faut durer
-constexpr float        kRecenterTrimMax  = 0.4f;   // ±0.4° de consigne, pas plus
-constexpr float        kRecenterRateDegS = 0.10f;  // charge : ~4 s pour ±0.4°
-constexpr float        kRecenterDecayDegS= 0.08f;  // retour à 0 une fois recentré
-constexpr float        kFootPanicDeg     = 35.0f;  // butée imminente → halt()
+//   externe (10 Hz)  : v_cible = kRecenterKpPhi · (0 − φ)   borné ±VelMax
+//   interne (200 Hz) : θ_ref  += kRecenterKv · (v_cible − φ̇)  borné ±RefMax
+//   PID 200 Hz       : maintient θ = θ_ref (inchangé)
+//
+// φ̇ est estimé SANS ENCODEUR : dériver la position intégrée par feet.cpp
+// serait bruité, on filtre à la place la VITESSE COMMANDÉE par un 1er
+// ordre τ = kFootVelTau — ce qui approxime la réponse du servo, et c'est
+// exactement ce qui a été simulé (sim/cascade_recenter.md).
+//
+// Au centre et à l'arrêt (φ = 0, φ̇ = 0) la contribution est nulle : le
+// PID retrouve son comportement normal. NON-const : réglables à chaud.
+constexpr unsigned long kRecenterPeriodMs = 100;   // 10 Hz (boucle externe)
+float kRecenterKpPhi = 0.8f;    // °/s de v_cible par ° d'erreur de pied
+float kRecenterKv    = 3.0f;    // ° de θ_ref par °/s d'erreur de vitesse
+constexpr float kRecenterVelMax = 20.0f;  // borne de v_cible (°/s)
+constexpr float kRecenterRefMax = 6.0f;   // borne de la contribution θ_ref (°)
+constexpr float kRecenterSlew   = 3.0f;   // rampe de v_cible (°/s²)
+constexpr float kFootVelTau     = 0.08f;  // filtre de la vitesse commandée (s)
+constexpr float kFootPanicDeg   = 35.0f;  // butée imminente → halt()
+
+// Bornes de réglage à chaud des gains de cascade
+constexpr float kRecenterKpPhiMax = 5.0f;
+constexpr float kRecenterKvMax    = 20.0f;
 
 // ── Pilotage depuis l'UI ───────────────────────────────────────────
 // Avancer = incliner la consigne dans le sens de la marche.
@@ -186,9 +195,9 @@ float s_lastRateDps = 0.0f;        // dernière vitesse gyro (télémétrie web)
 unsigned long s_lastMicros   = 0;
 unsigned long s_uprightSince = 0;  // début de la fenêtre de redressement
 
-float         s_recenterTrim = 0.0f;  // décalage lent de θ_ref (°), borné ±1
-unsigned long s_recenterLast = 0;     // dernier passage de la boucle 2 Hz
-unsigned long s_footOutSince = 0;     // depuis quand |pied| dépasse le seuil
+float         s_recenterVel  = 0.0f;  // v_cible lissée de la boucle externe (°/s)
+float         s_footVelFilt  = 0.0f;  // vitesse de pied commandée, filtrée (°/s)
+unsigned long s_recenterLast = 0;     // dernier passage de la boucle 10 Hz
 
 inline float slew(float current, float target, float maxStep) {
   const float delta = target - current;
@@ -204,8 +213,8 @@ void halt() {
   s_pid.reset();
   s_fwdSmooth = 0.0f;
   s_turnSmooth = 0.0f;
-  s_recenterTrim = 0.0f;
-  s_footOutSince = 0;
+  s_recenterVel = 0.0f;
+  s_footVelFilt = 0.0f;
   g_state.balancing = false;
 }
 
@@ -226,33 +235,35 @@ inline float limitTowardStop(float out, float footAvg, float pitch) {
   return out * k;
 }
 
-// Boucle de recentrage, appelée à 2 Hz. Renvoie false si les pieds sont
-// si loin que la butée est imminente (l'appelant coupe alors tout).
-// N'agit QUE sur la consigne d'angle : le PID garde la main.
+// Boucle EXTERNE de la cascade, appelée à 10 Hz : la position du pied
+// donne une consigne de VITESSE de pied, montée en rampe pour éviter les
+// à-coups. Renvoie false si les pieds sont si loin que la butée est
+// imminente (l'appelant coupe alors tout).
 bool recenterStep(float footAvg, float dtRec) {
-  const unsigned long ms = millis();
-
   if (fabsf(footAvg) > kFootPanicDeg) return false;
 
-  if (fabsf(footAvg) > kRecenterDeadDeg) {
-    if (s_footOutSince == 0) s_footOutSince = ms;
-    if (ms - s_footOutSince >= kRecenterHoldMs) {
-      // Pieds partis vers l'avant ⇒ il faut ROULER EN ARRIÈRE pour les
-      // ramener ⇒ pencher en arrière ⇒ consigne négative. D'où le signe
-      // opposé à footAvg.
-      const float dir = (footAvg > 0.0f) ? -1.0f : 1.0f;
-      s_recenterTrim = constrain(s_recenterTrim + dir * kRecenterRateDegS * dtRec,
-                                 -kRecenterTrimMax, kRecenterTrimMax);
-    }
-  } else {
-    // Recentré : on relâche le décalage, sinon le robot garderait une
-    // inclinaison permanente et repartirait dans l'autre sens.
-    s_footOutSince = 0;
-    const float step = kRecenterDecayDegS * dtRec;
-    if (fabsf(s_recenterTrim) <= step) s_recenterTrim = 0.0f;
-    else s_recenterTrim -= (s_recenterTrim > 0.0f ? step : -step);
-  }
+  // Pied parti vers l'avant ⇒ il faut le ramener en ARRIÈRE : v_cible
+  // est de signe opposé à φ (φ_ref = 0).
+  const float target = constrain(kRecenterKpPhi * (0.0f - footAvg),
+                                 -kRecenterVelMax, kRecenterVelMax);
+  s_recenterVel = slew(s_recenterVel, target, kRecenterSlew * dtRec);
   return true;
+}
+
+// Boucle INTERNE de la cascade (appelée à 200 Hz) : l'écart entre la
+// vitesse de pied voulue et celle réellement commandée devient un angle.
+// Pour faire ROULER le pied vers l'avant, le robot doit pencher vers
+// l'avant : le signe est donc direct.
+inline float recenterSetpoint() {
+  return constrain(kRecenterKv * (s_recenterVel - s_footVelFilt),
+                   -kRecenterRefMax, kRecenterRefMax);
+}
+
+// Estimateur de vitesse de pied SANS ENCODEUR : 1er ordre sur la commande
+// envoyée à feet.cpp (approxime le retard du servo).
+inline void updateFootVel(float cmdDegS, float dt) {
+  const float alpha = dt / (kFootVelTau + dt);
+  s_footVelFilt += alpha * (cmdDegS - s_footVelFilt);
 }
 
 // Mode démo (équilibre OFF) : les flèches de l'UI font rouler les pieds
@@ -292,8 +303,8 @@ bool begin() {
   s_fallen  = false;
   s_lastMicros = micros();
   s_recenterLast = millis();
-  s_recenterTrim = 0.0f;
-  s_footOutSince = 0;
+  s_recenterVel = 0.0f;
+  s_footVelFilt = 0.0f;
 
   // Les pieds d'abord : même sans IMU on veut les poser au repos (robot
   // droit), et l'UI reste utilisable en mode démo.
@@ -341,11 +352,11 @@ void loop() {
     s_uprightSince = 0;
     // Armement par g_state.cmdEnabled (l'UI n'appelle pas forcément
     // setEnabled) : sans ça, s_recenterLast daterait de la dernière
-    // désactivation et le premier pas de recentrage verrait un dt de
-    // plusieurs secondes — soit ±1° de consigne d'un coup.
+    // désactivation et le premier pas de la boucle externe verrait un dt
+    // de plusieurs secondes — soit toute la rampe franchie d'un bloc.
     s_recenterLast = millis();
-    s_recenterTrim = 0.0f;
-    s_footOutSince = 0;
+    s_recenterVel = 0.0f;
+    s_footVelFilt = 0.0f;
   }
   s_enabled = want;
 
@@ -417,7 +428,7 @@ void loop() {
   s_fwdSmooth  = slew(s_fwdSmooth,  (float)cmdFwd,  maxStep);
   s_turnSmooth = slew(s_turnSmooth, (float)cmdTurn, maxStep);
 
-  // ── Recentrage des pieds (2 Hz, en marge du PID) ─────────────────
+  // ── Cascade de recentrage — boucle externe (10 Hz) ───────────────
   // Le débattement du servo est fini : sans cette boucle le pied part
   // en butée et le robot tombe. On n'agit QUE sur θ_ref, jamais sur la
   // sortie du PID.
@@ -425,7 +436,7 @@ void loop() {
   {
     const unsigned long ms = millis();
     if (ms - s_recenterLast >= kRecenterPeriodMs) {
-      // dt borné : un hoquet de boucle ne doit pas charger le décalage
+      // dt borné : un hoquet de boucle ne doit pas franchir la rampe
       // d'un bloc (ceinture, en plus de la remise à zéro à l'armement).
       const float dtRec = constrain((ms - s_recenterLast) * 1e-3f, 0.0f, 1.0f);
       s_recenterLast = ms;
@@ -444,8 +455,10 @@ void loop() {
   // ── PID ──────────────────────────────────────────────────────────
   // Pour avancer, le robot doit d'abord se pencher vers l'avant :
   // on décale la consigne d'angle, le PID fait le reste.
+  // La boucle INTERNE de la cascade s'ajoute ici, à pleine cadence : elle
+  // suit s_footVelFilt qui, lui, évolue à 200 Hz.
   const float setpoint =
-      kSetpointDeg + s_fwdSmooth * kTiltPerCmd + s_recenterTrim;
+      kSetpointDeg + s_fwdSmooth * kTiltPerCmd + recenterSetpoint();
   float error = setpoint - pitch;
   if (fabsf(error) < kErrDeadbandDeg) error = 0.0f;   // mort-zone d'erreur
 
@@ -453,6 +466,11 @@ void loop() {
   out = constrain(out, -kOutMax, kOutMax);
   // Soft clamp de butée : la commande s'éteint avant le bout de l'arc.
   out = limitTowardStop(out, footAvg, pitch);
+
+  // Estimation de φ̇ pour la boucle interne : on filtre la commande de
+  // vitesse MOYENNE, prise APRÈS le clamp (c'est ce que les pieds font
+  // vraiment) et AVANT le différentiel (qui s'annule en moyenne).
+  updateFootVel(out * kOutToFootDegS, dt);
 
   // ── Différentiel de rotation ─────────────────────────────────────
   const float turn = s_turnSmooth * kTurnPerCmd;
@@ -475,8 +493,8 @@ void setEnabled(bool on) {
     s_uprightSince = 0;
     s_lastMicros = micros();
     s_recenterLast = millis();
-    s_recenterTrim = 0.0f;
-    s_footOutSince = 0;
+    s_recenterVel = 0.0f;
+    s_footVelFilt = 0.0f;
   } else {
     halt();
   }
@@ -506,6 +524,16 @@ void setGains(float kp, float ki, float kd) {
 
 void getGains(float& kp, float& ki, float& kd) {
   kp = kKp;  ki = kKi;  kd = kKd;
+}
+
+// ── Gains de la cascade de recentrage (mêmes règles) ───────────────
+void setRecenterGains(float kpPhi, float kv) {
+  if (!isnan(kpPhi)) kRecenterKpPhi = constrain(kpPhi, 0.0f, kRecenterKpPhiMax);
+  if (!isnan(kv))    kRecenterKv    = constrain(kv,    0.0f, kRecenterKvMax);
+}
+
+void getRecenterGains(float& kpPhi, float& kv) {
+  kpPhi = kRecenterKpPhi;  kv = kRecenterKv;
 }
 
 float pitchRateDps() { return s_lastRateDps; }
