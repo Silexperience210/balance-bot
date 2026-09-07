@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════
-// BalanceBot — module A · pieds en arc sur SG90 STANDARD (position)
+// BalanceBot — module A · pieds en arc (SG90 position OU servo continu)
 //
 // Mécanique (chassis/FIT_NOTES.md §9) : plus de roues. Chaque pied est
 // un arc de cercle de rayon R = 32.5 mm, ouverture 200°, vissé sur le
@@ -21,8 +21,18 @@
 // est calculée par balance.cpp (le pied et le corps consomment le même
 // arc : contact ≈ φ + θ).
 //
-// Le servo ne connaît que la POSITION : ce module intègre la vitesse
-// demandée par le PID (°/s) en position (°), au dt réel.
+// DEUX MATÉRIELS, un seul module — choisis par FEET_MODE_CONTINUOUS
+// (config.h) :
+//   • mode POSITION (=0, SG90 standard) : le servo ne connaît que la
+//     POSITION. Ce module intègre la vitesse demandée par le PID (°/s)
+//     en position (°), au dt réel, et écrit l'angle.
+//   • mode CONTINU (=1, servo 360°) : le servo ne connaît que la
+//     VITESSE (1500 µs = arrêt). La consigne du PID est déjà une
+//     vitesse : elle part DIRECTEMENT au servo. L'équilibre y devient
+//     réellement tenable, le moteur fournissant un couple continu.
+// Dans LES DEUX cas φ (position du pied) reste intégré ici : l'arc a une
+// course finie même quand le moteur n'en a plus, et c'est φ que lisent la
+// butée dure interne et le soft clamp de balance.cpp (Feet::angleAvg()).
 // ═══════════════════════════════════════════════════════════════════
 #include "feet.h"
 #include "config.h"
@@ -88,6 +98,52 @@ void writePositions() {
   s_right.writeMicroseconds(footToUs(s_footR, kDirR, kTrimDegR));
 }
 
+#if FEET_MODE_CONTINUOUS
+// ── CALIBRATION servo à ROTATION CONTINUE ──────────────────────────
+// Un servo 360° interprète l'impulsion comme une VITESSE : 1500 µs =
+// arrêt, plus court = un sens, plus long = l'autre, saturation vers
+// ±500 µs d'écart. Il n'y a AUCUN asservissement de position dedans.
+//
+// kUsPerDegS — conversion vitesse de pied (°/s) → écart au neutre (µs).
+//   Valeur par défaut 1.0 : les ±400 °/s de kSpeedMaxDegS occupent alors
+//   ±400 µs, soit à peu près toute la plage utile. À CALIBRER au premier
+//   test réel : envoyer une consigne à pleine vitesse et vérifier que le
+//   servo tourne à son maximum sans écrêter, c.-à-d. que la commande
+//   consomme ~±400-500 µs. Un servo plus lent (moins de °/s à pleine
+//   commande) demande un kUsPerDegS PLUS GRAND.
+// kTrimUsL/R — le « 1500 µs » réel n'est jamais exact : sans consigne, un
+//   servo continu rampe doucement. Après montage, corriger ici jusqu'à
+//   l'arrêt franc, servo par servo (typiquement quelques dizaines de µs).
+// kDeadbandDegS — sous ce seuil on écrit le neutre EXACT : une consigne
+//   minuscule ne fait pas tourner le servo mais le fait vibrer/dériver.
+constexpr float kNeutralUs    = 1500.0f;
+constexpr float kUsPerDegS    = 1.0f;
+constexpr float kTrimUsL      = 0.0f;
+constexpr float kTrimUsR      = 0.0f;
+constexpr float kDeadbandDegS = 5.0f;
+constexpr float kCmdMaxUs     = 500.0f;   // saturation de la plage servo
+
+// vitesse de pied (repère robot, °/s) → impulsion µs pour un servo donné.
+// Le sens (kDirL/kDirR) reste celui du montage en miroir : il s'applique
+// à la vitesse exactement comme il s'appliquait à la position.
+inline int speedToUs(float vDegS, float dir, float trimUs) {
+  float cmdUs = 0.0f;
+  if (fabsf(vDegS) >= kDeadbandDegS) {
+    cmdUs = clampf(dir * vDegS * kUsPerDegS, -kCmdMaxUs, kCmdMaxUs);
+  }
+  return (int)lroundf(kNeutralUs + trimUs + cmdUs);
+}
+
+// Écrit les deux vitesses courantes sur les servos.
+void writeSpeeds(float vL, float vR) {
+  s_left.writeMicroseconds(speedToUs(vL, kDirL, kTrimUsL));
+  s_right.writeMicroseconds(speedToUs(vR, kDirR, kTrimUsR));
+}
+
+// Arrêt franc des deux servos (neutre + trim).
+void writeNeutral() { writeSpeeds(0.0f, 0.0f); }
+#endif // FEET_MODE_CONTINUOUS
+
 } // namespace
 
 namespace Feet {
@@ -110,7 +166,11 @@ bool begin() {
   s_footL = 0.0f;
   s_footR = 0.0f;
   s_lastMicros = micros();
+#if FEET_MODE_CONTINUOUS
+  if (s_ready) writeNeutral();          // servos à l'arrêt dès le boot
+#else
   if (s_ready) writePositions();        // robot droit dès le boot
+#endif
   return s_ready;
 }
 
@@ -122,22 +182,43 @@ void driveFootSpeed(int leftDegS, int rightDegS) {
   s_lastMicros = now;
   dt = clampf(dt, kDtMinS, kDtMaxS);
 
-  const float vL = clampf((float)leftDegS,  -kSpeedMaxDegS, kSpeedMaxDegS);
-  const float vR = clampf((float)rightDegS, -kSpeedMaxDegS, kSpeedMaxDegS);
+  float vL = clampf((float)leftDegS,  -kSpeedMaxDegS, kSpeedMaxDegS);
+  float vR = clampf((float)rightDegS, -kSpeedMaxDegS, kSpeedMaxDegS);
 
+  // Intégration de φ — conservée dans les DEUX modes : en continu elle ne
+  // pilote plus le servo, mais elle reste la seule mesure de la course
+  // consommée sur l'arc (butée dure ci-dessous, soft clamp de balance.cpp).
   s_footL = clampf(s_footL + vL * dt, -kFootHardDeg, kFootHardDeg);
   s_footR = clampf(s_footR + vR * dt, -kFootHardDeg, kFootHardDeg);
 
+#if FEET_MODE_CONTINUOUS
+  // En position, écrêter φ suffisait à arrêter le pied à la butée. En
+  // continu le moteur, lui, continuerait de tourner : il faut couper
+  // explicitement la commande qui pousse au-delà.
+  if (s_footL >=  kFootHardDeg && vL > 0.0f) vL = 0.0f;
+  if (s_footL <= -kFootHardDeg && vL < 0.0f) vL = 0.0f;
+  if (s_footR >=  kFootHardDeg && vR > 0.0f) vR = 0.0f;
+  if (s_footR <= -kFootHardDeg && vR < 0.0f) vR = 0.0f;
+  writeSpeeds(vL, vR);
+#else
   writePositions();
+#endif
 }
 
 void stop() {
   if (!s_ready) return;
+  s_lastMicros = micros();
+#if FEET_MODE_CONTINUOUS
+  // Continu : « la dernière position » n'existe pas — la seule commande
+  // d'arrêt est le neutre 1500 µs. φ reste à sa valeur : le pied ne
+  // bouge plus, la course consommée sur l'arc non plus.
+  writeNeutral();
+#else
   // Position CONSERVÉE : un retour au neutre ferait basculer le robot.
   // On réécrit quand même la consigne pour que le servo tienne son
   // couple, et on repart d'un dt propre au prochain driveFootSpeed().
-  s_lastMicros = micros();
   writePositions();
+#endif
 }
 
 void recenterNow() {
@@ -145,7 +226,17 @@ void recenterNow() {
   s_footL = 0.0f;
   s_footR = 0.0f;
   s_lastMicros = micros();
+#if FEET_MODE_CONTINUOUS
+  // Continu : rien à « ramener » physiquement — le servo n'a pas de
+  // position de consigne, et faire tourner les pieds pour rejoindre un
+  // zéro qu'on ne mesure pas n'aurait aucun sens. On remet seulement le
+  // compteur de course φ à zéro, SANS écrire : l'appelant tient le robot
+  // à la main après une chute et les servos sont déjà au neutre (stop()
+  // via halt()). Le zéro de φ est donc conventionnel — il est redéfini
+  // « ici, maintenant », ce qui est exactement ce que veut le soft clamp.
+#else
   writePositions();
+#endif
 }
 
 float angleL()   { return s_footL; }

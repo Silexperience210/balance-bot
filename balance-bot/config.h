@@ -38,10 +38,24 @@
 // deux PIEDS EN ARC (foot_arc.stl) sur des SG90 STANDARD 180° — voir
 // feet.cpp et chassis/FIT_NOTES.md §9. Les broches sont inchangées, seuls
 // les noms suivent la mécanique.
-#define SERVO_FOOT_L    1      // pied gauche — SG90 standard (position 0-180°)
-#define SERVO_FOOT_R    2      // pied droit  — SG90 standard (position 0-180°)
+#define SERVO_FOOT_L    1      // pied gauche — servo de pied (cf. FEET_MODE_CONTINUOUS)
+#define SERVO_FOOT_R    2      // pied droit  — servo de pied (cf. FEET_MODE_CONTINUOUS)
 #define SERVO_HEAD_PAN  3      // tête : rotation horizontale (SG90 standard)
 #define SERVO_HEAD_TILT 10     // tête : inclinaison (SG90 standard)
+
+// ── TYPE des servos de PIEDS — sélecteur de mode (compile-time) ─────
+// Deux matériels possibles sur les mêmes broches, même boîtier 23×12.2×29 :
+//   0 = SG90 STANDARD 180° : le servo ne connaît que la POSITION. feet.cpp
+//       intègre la vitesse du PID (°/s) en position de pied (°) et écrit
+//       l'angle. C'est le mode HISTORIQUE, celui calibré et flashé.
+//   1 = servo à ROTATION CONTINUE 360° : le servo ne connaît que la
+//       VITESSE (1500 µs = arrêt, ±500 µs = pleine vitesse). La sortie du
+//       PID part DIRECTEMENT au servo, sans intégration position.
+// Le mode continu conserve malgré tout l'intégration interne de φ : l'arc
+// de pied a une course finie (~±100°) même quand le moteur, lui, n'en a
+// plus — c'est cette intégration que lit le soft clamp de balance.cpp
+// (Feet::angleAvg()). Voir feet.cpp pour la calibration µs/(°/s).
+#define FEET_MODE_CONTINUOUS 0
 
 // ── Ultrason HC-SR04 ───────────────────────────────────────────────
 #define PIN_US_TRIG     11
