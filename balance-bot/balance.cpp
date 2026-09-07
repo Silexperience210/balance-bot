@@ -40,9 +40,20 @@ namespace {
 //   1. monter Kp jusqu'à ce que le robot réagisse vif mais oscille ;
 //   2. monter Kd pour amortir l'oscillation (trop → tremblement aigu) ;
 //   3. monter Ki juste assez pour effacer la dérive lente / la pente.
-constexpr float kKp = 8.0f;    // vitesse par degré d'erreur
-constexpr float kKi = 20.0f;   // vitesse par (degré · seconde) d'erreur
-constexpr float kKd = 0.35f;   // vitesse par (degré / seconde) — sur le gyro
+//
+// Gains validés en simulation 1D (sim/, θ̈ = (g/h)·sinθ − (R/h)·φ̈·cosθ,
+// h = 80 mm, R = 32.5 mm, servo 1er ordre τ = 50 ms limité à 250 °/s,
+// contrôleur copié à l'identique depuis ce fichier).
+//
+// Condition de stabilité : la commande agit en VITESSE de pied, donc le
+// terme intégral est ce qui fournit la position de pied compensant la
+// gravité. Il faut Ki > g/R ≈ 9.81 / 0.0325 ≈ 301 s⁻² pour que le point
+// de contact rattrape le CoM ; en dessous, le robot tombe quelle que
+// soit la valeur de Kp. L'ancien Ki = 20 (hérité du design « roues »,
+// jamais testé) est 15× trop faible → chute systématique en sim.
+constexpr float kKp = 25.0f;   // vitesse par degré d'erreur
+constexpr float kKi = 500.0f;  // vitesse par (degré · seconde) — cf. Ki > g/R
+constexpr float kKd = 0.5f;    // vitesse par (degré / seconde) — sur le gyro
 
 // Consigne d'équilibre : angle auquel le robot tient réellement debout.
 // Décaler de quelques dixièmes si le robot dérive toujours du même côté.
