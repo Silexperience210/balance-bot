@@ -3,30 +3,17 @@
 Source : avis Claude Opus (analyse complète firmware + châssis).
 Statuts : ⬜ à faire · 🔄 en cours · ✅ fait · ⏸ bloqué (hardware/attente)
 
-## LOT 1 — Bugs critiques firmware (demi-journée, tout localisé)
-- [ ] 🔴 STOP inopérant après chute : le toggle UI pilote `g_state.balancing`
-      (remis à false par halt()) au lieu de `cmdEnabled`/`s_enabled` → le robot
-      se ré-engage seul 700 ms après redressement. Ajouter Balance::isFallen().
-- [ ] Latch de commande : retour au neutre seulement si !g_touchedRaw → le doigt
-      qui glisse hors du bouton laisse cmdForward=100. Évaluer la zone tenue
-      même doigt posé.
-- [ ] head.cpp:124 moyenne glissante US : `usSum += d - usSum/N` → point fixe 5·d
-      (distance ×5, obstacleWarn à 5 cm réels). Correctif : `usSum += (d-usSum)/N`.
-- [ ] head.cpp:186 headPanDeg en int + incrément 0.99 → pan jamais bougé.
-      Passer la position en float (ou incrément ≥ 1°).
-- [ ] ui.cpp:316-326 : obstacleWarn affiché « CHUTE » au lieu de l'état réel ;
-      exporter s_fallen et afficher « CHUTE » seulement pour la vraie chute.
-- [ ] ui.cpp:286 : signe du pitch perdu sous 1° (−0.5° → « 0.5 »). Corriger le
-      formatage.
-- [ ] head.cpp:81 : Head::begin() retourne toujours true (« TÊTE+US : ÉCHEC »
-      mort). Détecter un vrai échec. Head::scan() no-op.
-- [ ] battery.cpp:30 : 0.0V hors plage indistinguable d'une panne ; aucune
-      action batterie basse.
-- [ ] setStatusLine vs ligne debug y=54 : se recouvrent (setStatusLine inutilisé,
-      le supprimer ou le fusionner).
-- [ ] Hygiène : doublons firmware/config.h+interfaces.h figés (supprimer),
-      calibration 240×320 obsolète (mettre à jour ou retirer), code mort à
-      marquer (Wheels::drive, lastLeftUs).
+## LOT 1 — Bugs critiques firmware ✅ (fait 07/09 ~03:00, commit e238f97)
+- [x] 🔴 STOP inopérant après chute (isFallen exposé, toggle sur isEnabled réel)
+- [x] Latch de commande (retour neutre si !dirHeld)
+- [x] head.cpp moyenne glissante US ×5 (usAvg, amorçage, timeouts non injectés)
+- [x] Pan/tilt en float, 30°/s réels, retour centre borné en vitesse
+- [x] CHUTE (isFallen) vs OBST. (obstacleWarn) distincts à l'écran
+- [x] Signe du pitch explicite sous 1°
+- [x] Head::begin() réel (servo.attached() → « TÊTE+US : ÉCHEC »)
+- [x] Batterie : −1 hors plage (= USB seul), isLow() seuil 3.5V, batteryLow
+- [x] setStatusLine/g_statusLine supprimés partout
+- [x] Hygiène : firmware/ + calibration/ supprimés, code mort Wheels retiré
 
 ## LOT 2 — Actionneur en position (feet.cpp) — le cœur
 - [ ] Remplacer wheels.cpp (vitesse servo continu) par un pilotage en ANGLE DE

@@ -34,8 +34,12 @@
 #define PIN_IIC_SDA     18
 
 // ── Servos (GPIO libres) ───────────────────────────────────────────
-#define SERVO_WHEEL_L   1      // roue gauche — rotation continue (SG90 modifié)
-#define SERVO_WHEEL_R   2      // roue droite — rotation continue (SG90 modifié)
+// Mécanique v2 : plus de roues. Les GPIO 1 et 2 pilotent maintenant les
+// deux PIEDS EN ARC (foot_arc.stl) sur des SG90 STANDARD 180° — voir
+// feet.cpp et chassis/FIT_NOTES.md §9. Les broches sont inchangées, seuls
+// les noms suivent la mécanique.
+#define SERVO_FOOT_L    1      // pied gauche — SG90 standard (position 0-180°)
+#define SERVO_FOOT_R    2      // pied droit  — SG90 standard (position 0-180°)
 #define SERVO_HEAD_PAN  3      // tête : rotation horizontale (SG90 standard)
 #define SERVO_HEAD_TILT 10     // tête : inclinaison (SG90 standard)
 
@@ -51,7 +55,6 @@
 #define HEAD_TILT_MAX   90
 #define US_MAX_CM       150    // portée utile du HC-SR04
 #define US_STOP_CM      25     // distance d'arrêt d'urgence
-#define WHEEL_NEUTRAL   90     // pulse neutre servo (1.5 ms)
 // Seuil « batterie faible » d'une cellule LiPo 1S : sous 3.5 V la cellule
 // n'a plus qu'environ 10-15 % de charge et sa tension s'effondre vite sous
 // l'appel de courant des servos. À distinguer de « pas de batterie » (USB

@@ -12,6 +12,8 @@ struct BotState {
   bool  balancing = false;   // vrai quand le robot tient debout
   float pitchDeg  = 0.0f;    // inclinaison mesurée
   float balanceHz = 0.0f;    // fréquence RÉELLE de la boucle d'équilibre
+  int   footLDeg  = 0;       // angle du pied gauche (° ; 0 = repos, + = avant)
+  int   footRDeg  = 0;       // angle du pied droit  (idem)
   uint8_t dbgUiMs  = 0;      // pire temps d'Ui::loop (ms, dernière seconde)
   uint8_t dbgHeadMs = 0;     // pire temps de Head::loop (ms, dernière seconde)
   float batteryV  = 0.0f;    // tension batterie (-1 = aucune batterie plausible : USB seul)
@@ -31,8 +33,9 @@ struct BotState {
 
 extern BotState g_state;     // instance globale unique, définie dans le .ino
 
-// ── Module A : équilibre (imu.h / balance.h / wheels.h) ────────────
-// Implémente : IMU MPU6050 sur I2C, filtre, PID 200 Hz, roues servo.
+// ── Module A : équilibre (imu.h / balance.h / feet.h) ──────────────
+// Implémente : IMU MPU6050 sur I2C, filtre, PID 200 Hz, pieds en arc
+// sur servos de POSITION (mécanique v2 — plus de roues).
 namespace Balance {
   bool  begin();                 // init IMU + servos ; false si IMU absent
   void  loop();                  // 1 itération 200 Hz (appelée par le .ino)

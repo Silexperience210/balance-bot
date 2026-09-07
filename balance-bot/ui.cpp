@@ -184,11 +184,13 @@ static void drawStatic() {
   g_tft.drawString("BAT", 6, 44);
   g_tft.drawString("OBS", 166, 32);
   g_tft.drawString("MODE", 166, 44);
+  g_tft.drawString("PIED", 166, 54);   // angle moyen des pieds en arc
   g_tft.setTextColor(C_TEXT, C_BG);
   g_tft.drawString("0.0 deg", 48, 32);
   g_tft.drawString("0.00 V", 48, 44);
   g_tft.drawString("--", 206, 32);
   g_tft.drawString("MANUEL", 206, 44);
+  g_tft.drawString("P:+0 deg", 206, 54);
 
   // Boutons
   for (int i = 0; i < g_zoneCount; i++) drawButton(i);
@@ -325,6 +327,20 @@ void Ui::loop() {
     if (obs < 0) snprintf(b, sizeof(b), "--");
     else         snprintf(b, sizeof(b), "%d cm", obs);
     updateLabel(206, 32, 60, b, obs >= 0 && obs < 100 ? C_ORANGE : C_TEXT);
+  }
+
+  // 4b bis. Angle moyen des pieds en arc — sert à voir venir la butée
+  // (±45° côté firmware) et à vérifier que le recentrage fait son
+  // travail : en équilibre stable, P doit osciller autour de 0.
+  {
+    static int s_lastFoot = -9999;
+    const int foot = (g_state.footLDeg + g_state.footRDeg) / 2;
+    if (foot != s_lastFoot) {
+      s_lastFoot = foot;
+      char b[16];
+      snprintf(b, sizeof(b), "P:%+d deg", foot);
+      updateLabel(206, 54, 76, b, abs(foot) >= 30 ? C_ORANGE : C_TEXT);
+    }
   }
 
   // 4c. Mode
