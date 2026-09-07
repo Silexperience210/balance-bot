@@ -15,14 +15,31 @@ Statuts : ⬜ à faire · 🔄 en cours · ✅ fait · ⏸ bloqué (hardware/att
 - [x] setStatusLine/g_statusLine supprimés partout
 - [x] Hygiène : firmware/ + calibration/ supprimés, code mort Wheels retiré
 
-## LOT 2 — Actionneur en position (feet.cpp) — le cœur
-- [ ] Remplacer wheels.cpp (vitesse servo continu) par un pilotage en ANGLE DE
-      PIED φ (servos standards), sortie PID = vitesse de pied intégrée,
-      saturation |φ| ≤ 90−|θ|−marge.
-- [ ] Supprimer shapeOutput (saut 0→8 = impulsion 4,5 mm nuisible).
-- [ ] Boucle externe lente : recentrage de φ vers 0 via le setpoint de tangage.
-- [ ] Publier φ dans BotState + l'afficher à l'écran.
-- [ ] Réglage PID sur le robot (Kp/Ki/Kd adaptés au mode position).
+## LOT 2 — Actionneur en position ✅ (feet.cpp, commit faa1994 — 07/09 ~03:30)
+- [x] feet.cpp : pilotage ANGLE DE PIED (servos SG90 std, µs 500-2500, float,
+      butée dure ±45°, trims kTrimDegL/R, dt réel borné)
+- [x] shapeOutput supprimé ; soft clamp dynamique (90−|θ|−9°, taper 10°)
+- [x] Recentrage 2 Hz (adouci Lot 2b : trim ±0.4°, 0.10°/s) ; panic > 35°
+- [x] footLDeg/footRDeg dans BotState + « PIED P:+0 deg » à l'écran
+- [x] wheels.cpp/h supprimés
+
+## LOT 2b — Gains PID validés par SIMULATION ✅ (commit 87758d0)
+- [x] Simulateur 1D rejouable (sim/balancebot_sim.py) : prouve Ki > g/R ≈ 300
+      requis — le Ki=20 hérité du design « roues » ne pouvait PAS tenir debout
+- [x] Gains appliqués : Kp 8→25, Ki 20→500, Kd 0.35→0.5 (validés : tient
+      θ0=5°, bruit, tapes modérées ; chute > 0.8 rad/s = limite ±45° course)
+- [x] Recentrage adouci pour le 1er test (trim ±1→±0.4°, rate 0.3→0.1°/s)
+- [x] Fragilité du trim d'angle documentée (balancebot penché = accélère)
+- [x] TEST_PROTOCOL.md : protocole complet du premier essai debout
+
+## ⏭ Prochaines étapes (dépendent du TEST RÉEL)
+- [ ] Lot 3 : alim séparée servos (BEC/power bank 5V + GND commun) — Silex
+- [ ] Test réel : signe câblage, neutre, équilibre tenu → lâcher
+- [ ] Réglage fin gains sur le robot (tableau dans TEST_PROTOCOL.md)
+- [ ] Lot 4 : FreeRTOS (équilibre cœur 0) — APRÈS stabilisation réelle
+- [ ] Lot 5 : télémétrie + gains à chaud
+- [ ] Lot 6 : ToF VL53L1X (achat ~5 €)
+- [ ] Lot 7 : LQR + Kalman
 
 ## LOT 3 — Alimentation servos (hardware, à faire par Silex en parallèle)
 - [ ] Rail 5-6V séparé (2S+BEC ou boost 5V/3A), masse commune, 470-1000 µF près
