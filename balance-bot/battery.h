@@ -12,5 +12,6 @@
 
 namespace Battery {
   void  begin();
-  float readVolts();   // tension estimée en volts
+  float readVolts();   // tension estimée en volts ; -1 = aucune batterie plausible
+  bool  isLow();       // dernière lecture VALIDE sous BAT_LOW_V
 }

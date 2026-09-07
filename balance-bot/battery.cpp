@@ -12,6 +12,16 @@ static const float ADC_FACTOR = 2.0f;   // pont diviseur 1/2
 static const float ADC_MAX_MV = 3300.0f;
 static const int   ADC_BITS   = 12;     // résolution 4096
 
+// Plage plausible d'une cellule LiPo 1S : 3.0 V (protection basse) à 4.4 V.
+// Hors de cette plage, ce n'est PAS une batterie faible mais une absence de
+// batterie (USB seul : l'ADC lit ~0 V, ou la ligne de charge sature) → -1,
+// que l'UI affiche « USB » et non « 0.00 V ».
+static const float BAT_MIN_V = 3.0f;
+static const float BAT_MAX_V = 4.4f;
+
+// Dernière lecture valide sous le seuil bas (BAT_LOW_V, config.h).
+static bool s_low = false;
+
 void begin() {
   // PIN_BAT_VOLT = GPIO4 = ADC1_CH3 — lecture analogique simple
   pinMode(PIN_BAT_VOLT, INPUT);
@@ -23,12 +33,16 @@ void begin() {
 
 float readVolts() {
   int raw = analogRead(PIN_BAT_VOLT);
-  if (raw <= 0) return 0.0f;
   float mv = (raw * ADC_MAX_MV) / (float)((1 << ADC_BITS) - 1);
   float volts = (mv / 1000.0f) * ADC_FACTOR;
-  // Plage plausible batterie LiPo 1S : 3.0 - 4.4 V. Hors plage → 0
-  if (volts < 3.0f || volts > 4.4f) return 0.0f;
+  if (raw <= 0 || volts < BAT_MIN_V || volts > BAT_MAX_V) {
+    s_low = false;      // pas de batterie mesurable : ni basse ni haute
+    return -1.0f;       // « aucune batterie plausible » (cf. interfaces.h)
+  }
+  s_low = (volts < BAT_LOW_V);
   return volts;
 }
+
+bool isLow() { return s_low; }
 
 }  // namespace Battery

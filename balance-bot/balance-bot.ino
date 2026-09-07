@@ -79,7 +79,8 @@ void loop() {
   static unsigned long tBat = 0;
   if (nowMs - tBat >= 1000) {
     tBat = nowMs;
-    g_state.batteryV = Battery::readVolts();
+    g_state.batteryV = Battery::readVolts();   // -1 = USB seul, pas de batterie
+    g_state.batteryLow = Battery::isLow();
     // Fenêtre de debug écoulée : on repart de zéro pour la seconde suivante
     g_state.dbgUiMs = 0;
     g_state.dbgHeadMs = 0;

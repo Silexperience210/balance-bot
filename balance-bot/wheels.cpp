@@ -43,9 +43,7 @@ constexpr int kSpeedMax = 90;
 
 Servo s_left;
 Servo s_right;
-bool  s_ready    = false;
-int   s_lastUsL  = kNeutralUsL;
-int   s_lastUsR  = kNeutralUsR;
+bool  s_ready = false;
 
 inline int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
@@ -81,28 +79,16 @@ bool begin() {
 
 void driveSigned(int leftSpeed, int rightSpeed) {
   if (!s_ready) return;
-  s_lastUsL = speedToUs(leftSpeed,  kNeutralUsL, kDirL);
-  s_lastUsR = speedToUs(rightSpeed, kNeutralUsR, kDirR);
-  s_left.writeMicroseconds(s_lastUsL);
-  s_right.writeMicroseconds(s_lastUsR);
-}
-
-void drive(int leftPwm, int rightPwm) {
-  // Domaine « servo » 0..180 ⇒ vitesse signée autour de WHEEL_NEUTRAL.
-  driveSigned(clampi(leftPwm,  0, 180) - WHEEL_NEUTRAL,
-              clampi(rightPwm, 0, 180) - WHEEL_NEUTRAL);
+  s_left.writeMicroseconds(speedToUs(leftSpeed,  kNeutralUsL, kDirL));
+  s_right.writeMicroseconds(speedToUs(rightSpeed, kNeutralUsR, kDirR));
 }
 
 void stop() {
   if (!s_ready) return;
-  s_lastUsL = kNeutralUsL;
-  s_lastUsR = kNeutralUsR;
-  s_left.writeMicroseconds(s_lastUsL);
-  s_right.writeMicroseconds(s_lastUsR);
+  s_left.writeMicroseconds(kNeutralUsL);
+  s_right.writeMicroseconds(kNeutralUsR);
 }
 
-bool ready()      { return s_ready; }
-int  lastLeftUs() { return s_lastUsL; }
-int  lastRightUs(){ return s_lastUsR; }
+bool ready() { return s_ready; }
 
 } // namespace Wheels

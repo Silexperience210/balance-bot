@@ -52,3 +52,8 @@
 #define US_MAX_CM       150    // portée utile du HC-SR04
 #define US_STOP_CM      25     // distance d'arrêt d'urgence
 #define WHEEL_NEUTRAL   90     // pulse neutre servo (1.5 ms)
+// Seuil « batterie faible » d'une cellule LiPo 1S : sous 3.5 V la cellule
+// n'a plus qu'environ 10-15 % de charge et sa tension s'effondre vite sous
+// l'appel de courant des servos. À distinguer de « pas de batterie » (USB
+// seul), signalé par batteryV = -1 (cf. battery.cpp).
+#define BAT_LOW_V       3.5f
