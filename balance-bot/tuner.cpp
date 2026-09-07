@@ -1,8 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════
 // BalanceBot — module D · banc de réglage web à chaud (mode AP)
 //
-// BUT : régler Kp/Ki/Kd et lire la télémétrie depuis un téléphone,
-// SANS recompiler ni reflasher, pendant que la main tient le robot.
+// BUT : régler Kp/Ki/Kd + la cascade de recentrage (Kpφ/Kv) et lire la
+// télémétrie depuis un téléphone, SANS recompiler ni reflasher, pendant
+// que la main tient le robot.
 //
 // La carte ouvre un point d'accès « BalanceBot-Tune », on s'y connecte
 // et on ouvre http://192.168.4.1/.
@@ -47,18 +48,18 @@ const char kPage[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="fr"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>BalanceBot</title><style>
 *{box-sizing:border-box}
-body{margin:0;padding:10px;background:#0d0f12;color:#e8e8e8;font:15px system-ui,sans-serif}
-h1{font-size:14px;margin:0 0 8px;color:#ff9d2e;letter-spacing:.12em}
-.c{background:#181b20;border-radius:10px;padding:10px;margin-bottom:10px}
-#p{font-size:46px;font-weight:600;text-align:center;line-height:1.1;font-variant-numeric:tabular-nums}
+body{margin:0;padding:8px;background:#0d0f12;color:#e8e8e8;font:15px system-ui,sans-serif}
+h1{font-size:13px;margin:0 0 6px;color:#ff9d2e;letter-spacing:.12em}
+.c{background:#181b20;border-radius:10px;padding:8px;margin-bottom:8px}
+#p{font-size:38px;font-weight:600;text-align:center;line-height:1.05;font-variant-numeric:tabular-nums}
 #p.up{color:#3ddc6b}
-.t{display:flex;justify-content:space-between;font-size:12px;color:#8b94a0;margin-top:6px}
-.t b{display:block;color:#e8e8e8;font-size:16px;font-variant-numeric:tabular-nums}
-label{display:flex;justify-content:space-between;font-size:14px;margin-bottom:2px}
+.t{display:flex;justify-content:space-between;font-size:11px;color:#8b94a0;margin-top:4px}
+.t b{display:block;color:#e8e8e8;font-size:15px;font-variant-numeric:tabular-nums}
+label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:0}
 label b{color:#ff9d2e;font-variant-numeric:tabular-nums}
-input{width:100%;height:36px;accent-color:#ff9d2e}
-.r{margin-bottom:10px}.r:last-child{margin-bottom:0}
-button{width:100%;height:64px;font-size:22px;font-weight:700;border:0;border-radius:10px;background:#2a2f38;color:#e8e8e8}
+input{width:100%;height:28px;margin:0;accent-color:#ff9d2e}
+.r{margin-bottom:4px}.r:last-child{margin-bottom:0}
+button{width:100%;height:56px;font-size:21px;font-weight:700;border:0;border-radius:10px;background:#2a2f38;color:#e8e8e8}
 button.on{background:#c0392b}
 #s{text-align:center;font-size:12px;color:#667;margin-top:8px}
 </style></head><body>
@@ -70,11 +71,13 @@ button.on{background:#c0392b}
 <div class="r"><label>Kp<b id="vkp">--</b></label><input type="range" id="kp" min="0" max="100" step="0.5"></div>
 <div class="r"><label>Ki<b id="vki">--</b></label><input type="range" id="ki" min="0" max="2000" step="10"></div>
 <div class="r"><label>Kd<b id="vkd">--</b></label><input type="range" id="kd" min="0" max="10" step="0.1"></div>
+<div class="r"><label>Recentre Kp&phi;<b id="vkpphi">--</b></label><input type="range" id="kpphi" min="0" max="5" step="0.1"></div>
+<div class="r"><label>Recentre Kv<b id="vkv">--</b></label><input type="range" id="kv" min="0" max="20" step="0.5"></div>
 </div>
 <button id="b">&Eacute;QUILIBRE</button>
 <div id="s">connexion&hellip;</div>
 <script>
-var E=function(i){return document.getElementById(i)},K=['kp','ki','kd'];
+var E=function(i){return document.getElementById(i)},K=['kp','ki','kd','kpphi','kv'];
 var drag=0,tmr=0,bal=0,first=1;
 var FORM={method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'}};
 function post(u,b){var o={};for(var k in FORM)o[k]=FORM[k];o.body=b;return fetch(u,o)}
@@ -84,7 +87,7 @@ K.forEach(function(k){var s=E(k);
  // au relacher du doigt : un seul POST, 300 ms apres le dernier geste
  s.onchange=function(){drag=0;clearTimeout(tmr);tmr=setTimeout(send,300)};
 });
-function send(){tmr=0;post('/api/gains','kp='+E('kp').value+'&ki='+E('ki').value+'&kd='+E('kd').value)}
+function send(){tmr=0;post('/api/gains',K.map(function(k){return k+'='+E(k).value}).join('&'))}
 E('b').onclick=function(){post('/api/bal','on='+(bal?0:1))};
 function tick(){fetch('/api/state').then(function(r){return r.json()}).then(function(d){
  E('p').textContent=d.pitch.toFixed(1)+'°';
@@ -117,16 +120,18 @@ void handleRoot() {
 // robot tient effectivement debout (g_state.balancing).
 void handleState() {
   touchReq();
-  float kp, ki, kd;
+  float kp, ki, kd, kpPhi, kv;
   Balance::getGains(kp, ki, kd);
+  Balance::getRecenterGains(kpPhi, kv);
   char buf[256];
   snprintf(buf, sizeof(buf),
            "{\"pitch\":%.1f,\"rate\":%.0f,\"footL\":%d,\"footR\":%d,"
            "\"hz\":%.0f,\"kp\":%.1f,\"ki\":%.0f,\"kd\":%.2f,"
+           "\"kpphi\":%.1f,\"kv\":%.1f,"
            "\"balancing\":%d,\"up\":%d}",
            g_state.pitchDeg, Balance::pitchRateDps(),
            g_state.footLDeg, g_state.footRDeg, g_state.balanceHz,
-           kp, ki, kd,
+           kp, ki, kd, kpPhi, kv,
            Balance::isEnabled() ? 1 : 0, g_state.balancing ? 1 : 0);
   s_server.send(200, "application/json", buf);
 }
@@ -140,9 +145,12 @@ float argOrNan(const char* name) {
 void handleGains() {
   touchReq();
   Balance::setGains(argOrNan("kp"), argOrNan("ki"), argOrNan("kd"));
-  float kp, ki, kd;
+  Balance::setRecenterGains(argOrNan("kpphi"), argOrNan("kv"));
+  float kp, ki, kd, kpPhi, kv;
   Balance::getGains(kp, ki, kd);
-  Serial.printf("TUNER : gains → Kp=%.1f Ki=%.0f Kd=%.2f\n", kp, ki, kd);
+  Balance::getRecenterGains(kpPhi, kv);
+  Serial.printf("TUNER : gains → Kp=%.1f Ki=%.0f Kd=%.2f | Kpφ=%.1f Kv=%.1f\n",
+                kp, ki, kd, kpPhi, kv);
   s_server.send(200, "text/plain", "ok");
 }
 
