@@ -37,7 +37,9 @@ Statuts : ⬜ à faire · 🔄 en cours · ✅ fait · ⏸ bloqué (hardware/att
 - [ ] Test réel : signe câblage, neutre, équilibre tenu → lâcher
 - [ ] Réglage fin gains sur le robot (tableau dans TEST_PROTOCOL.md)
 - [ ] Lot 4 : FreeRTOS (équilibre cœur 0) — APRÈS stabilisation réelle
-- [ ] Lot 5 : télémétrie + gains à chaud
+- [x] Lot 5 : banc de réglage web (commit 7d59c75) — AP BalanceBot-Tune,
+      page sliders + télémétrie, TESTÉ RUNTIME par Hermes (HTTP 200, state
+      JSON OK, POST gains kp 25→30→25 OK, hz 198 avec tuner actif)
 - [ ] Lot 6 : ToF VL53L1X (achat ~5 €)
 - [ ] Lot 7 : LQR + Kalman
 
