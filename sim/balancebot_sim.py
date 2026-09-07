@@ -88,7 +88,9 @@ class Sim:
             self.phi_cmd = max(-FOOT_HARD, min(FOOT_HARD, self.phi_cmd + u * dt_sim))
             dphi = (self.phi_cmd - self.phi) / TAU_SERVO
             dphi = max(-VMAX_SERVO, min(VMAX_SERVO, dphi))
-            a = R * (dphi - self.prev_dphi) / dt_sim
+            # Conversion °/s² → rad/s² : l'équation du pendule est en radians !
+            # (sans le facteur π/180 l'autorité de commande était surestimée de 57×)
+            a = R * (dphi - self.prev_dphi) / dt_sim * (math.pi / 180.0)
             self.prev_dphi = dphi
             self.phi += dphi * dt_sim
             self.vbase = R * dphi * math.pi / 180

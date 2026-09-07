@@ -462,7 +462,19 @@ void loop() {
   float error = setpoint - pitch;
   if (fabsf(error) < kErrDeadbandDeg) error = 0.0f;   // mort-zone d'erreur
 
-  float out = s_pid.update(error, rate, dt);
+  // SIGNE DE LA CONTRE-RÉACTION — ne pas « simplifier » cette inversion.
+  // Le PID ci-dessus est un PID standard sur (consigne − mesure). Un pendule
+  // INVERSÉ demande le signe OPPOSÉ : quand le robot penche vers l'avant
+  // (pitch > 0 ⇒ error < 0), il faut que les pieds roulent vers l'AVANT
+  // (out > 0) pour ramener le point d'appui sous le centre de gravité.
+  // Sans cette inversion la boucle est une contre-réaction POSITIVE (le
+  // terme en θ̇ comme celui en θ déstabilisent) et le robot pique du nez.
+  // C'est exactement ce que fait le simulateur validé, qui intègre −ctrl()
+  // (sim/balancebot_sim.py : « u = -self.ctrl(noise) »).
+  // Tout ce qui suit (soft clamp, estimateur φ̇, différentiel) attend un
+  // « out » homogène à une VITESSE DE PIED : l'inversion doit rester ici,
+  // avant ces étages.
+  float out = -s_pid.update(error, rate, dt);
   out = constrain(out, -kOutMax, kOutMax);
   // Soft clamp de butée : la commande s'éteint avant le bout de l'arc.
   out = limitTowardStop(out, footAvg, pitch);

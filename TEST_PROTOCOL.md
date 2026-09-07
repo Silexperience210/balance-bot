@@ -35,11 +35,23 @@ le corps vers l'avant de ~10° à la main :
 - **Bon signe** : les pieds partent VERS L'AVANT (pour rattraper la chute)
 - **Mauvais signe** : les pieds partent en arrière → couper STOP immédiatement,
   inverser le signe (voir note ci-dessous)
-Note : « avant » = le sens où le haut du robot penche. Si mauvais signe,
-corriger par UN SEUL patch : `kAccelPitchSign` dans imu.cpp (section RÉGLAGE
-MÉCANIQUE, ligne ~46) — +1 → −1 (ou l'inverse). C'est le correctif global
-(équivalent à inverser kDirL ET kDirR, mais en 1 constante). Ne pas toucher
-aux servos si le signe est le même sur les deux pieds.
+Note : « avant » = le sens où le haut du robot penche.
+
+Avant tout, vérifier l'ÉCRAN à l'étape 1 : pencher le robot vers l'avant doit
+faire MONTER le pitch affiché (convention `pitch > 0 = penche vers l'avant`).
+- Si le pitch affiché part dans le mauvais sens, l'IMU est monté à l'envers :
+  inverser **les DEUX** constantes d'imu.cpp, `kAccelPitchSign` ET
+  `kGyroPitchSign` (section RÉGLAGE MÉCANIQUE, ligne ~53). N'en inverser
+  qu'une seule casse le filtre complémentaire (le gyro intègre à l'envers et
+  l'accéléromètre le rattrape en permanence) : l'angle devient faux et
+  traînard, pas seulement inversé.
+- Si le pitch affiché est bon mais que les pieds partent en arrière, ce n'est
+  PAS un problème de câblage : c'est le signe de la boucle (`out = -s_pid…`
+  dans balance.cpp, bloc « SIGNE DE LA CONTRE-RÉACTION »). Ne pas le
+  compenser dans imu.cpp — l'inversion de l'IMU inverserait aussi les flèches
+  AVANT/ARRIÈRE de l'UI et le sens du recentrage.
+Ne pas toucher aux servos si le signe est le même sur les deux pieds (le sens
+de chaque pied se valide seul à l'étape 2, via kDirL / kDirR).
 
 ### 4. Équilibre tenu (robot maintenu)
 Tenir le robot droit à la main (pieds au sol), activer EQUIL. Sentir les
@@ -53,9 +65,17 @@ progressivement en gardant les mains prêtes à rattraper.
 ### 5. Pose libre (premier lâcher)
 Le robot tenu droit, le poser, attendre qu'il soit stable 1-2 s (le pitch
 doit être ~0), puis lâcher doucement en retirant les mains vers le bas.
-S'il part en avant ou en arrière : il « court » — c'est le récentrage qui
-doit le ramener (max 0.4° de trim — si ça ne suffit pas, c'est le sujet du
+S'il part en avant ou en arrière : il « court » — c'est la cascade de
+recentrage qui doit le ramener (si ça ne suffit pas, c'est le sujet du
 prochain réglage, PAS un bug).
+
+**Faire ce premier lâcher avec la cascade DÉSARMÉE** : dans le tuner web,
+mettre Kpφ = 0 et Kv = 0. On valide d'abord le PID seul (le robot tient
+debout mais dérive et finit en butée — c'est normal). Ensuite seulement,
+monter Kv à 1 puis 3, et Kpφ à 0.4 puis 0.8. Raison : `Kv·(v_cible − φ̇)` est
+borné à ±6°, soit autant que le plein gaz des flèches — à Kv = 3 il sature
+dès 2 °/s d'écart de vitesse et peut injecter une assiette de consigne en
+créneau. Ce point n'a jamais tourné sur du matériel réel.
 
 ## Réglages rapides (constantes, balance.cpp)
 | Symptôme | Constante |
@@ -63,7 +83,8 @@ prochain réglage, PAS un bug).
 | Buzz / oscillation rapide | ↓ kKp (25→15), ↑ kKd (0.5→1.0) |
 | Tombe mollement | ↑ kKp (25→40), ↑ kKi (500→700) |
 | Dérive avant/arrière constante | kTrimDegL/R (feet.cpp) ou neutre palonnier |
-| Recentrage trop lent | ↑ kRecenterTrimMax (0.4→0.8), ↑ kRecenterRateDegS |
+| Recentrage trop lent | ↑ Kpφ (tuner web, 0→0.8), puis ↑ Kv (0→3.0) |
+| Robot qui « bat » à ±6° d'assiette | Kv trop fort : le redescendre à 0 |
 | Robot complet (tête + mât montés, CoM > 100 mm) | Essayer Kp 40, Ki 600, Kd 1.5 (sim : gains v1 tiennent h ≤ 100 mm) |
 
 ## Limites connues (à ne pas prendre pour des bugs)
