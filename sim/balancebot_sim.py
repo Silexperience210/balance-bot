@@ -17,6 +17,12 @@ Résultats clés (commit ea68b1b) :
   pas vitesse constante) → adouci dans le firmware (max ±0.4°, 0.10°/s).
 - Sensibilité (validée) : Kp25/Ki500/Kd0.5 tient pour h ∈ [50-100 mm] et
   τ servo ≤ 100 ms. Robot complet tête+mât (h > 100 mm) : Kp40/Ki600/Kd1.5.
+- MOBILITÉ (testée, limite structurelle) : la marche par inclinaison ne
+  déplace le robot que de ~2,5 cm avant butée du pied (±45° = ±25 mm) puis
+  chute — pencher = accélérer, et sans boucle de vitesse (pas d'encodeur)
+  rien ne limite la course. Le v2 est un BALANCIER STATIQUE : il tient
+  debout, encaisse les perturbations modérées, se recentre lentement.
+  Mobilité réelle = N20 + encodeurs (lumière prévue dans le châssis).
 """
 import math, random, sys
 import matplotlib

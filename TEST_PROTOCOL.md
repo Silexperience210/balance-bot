@@ -67,6 +67,10 @@ prochain réglage, PAS un bug).
 | Robot complet (tête + mât montés, CoM > 100 mm) | Essayer Kp 40, Ki 600, Kd 1.5 (sim : gains v1 tiennent h ≤ 100 mm) |
 
 ## Limites connues (à ne pas prendre pour des bugs)
+- **Mobilité ~2,5 cm max** (simulé) : le robot est un BALANCIER STATIQUE.
+  Les flèches AVANT/ARRIÈRE en mode équilibre le feront avancer de 1-2 cm
+  puis il se recentrera — au-delà, le pied tape sa butée et il tombe.
+  C'est la physique des arcs ±45° sans boucle de vitesse. Ne pas insister.
 - Course du pied ±45° → une grosse tape fait « courir » le robot puis
   tomber (physique, pas un défaut de gains)
 - Le recentrage est volontairement TRÈS doux pour le premier test

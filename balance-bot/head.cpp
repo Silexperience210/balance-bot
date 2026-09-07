@@ -43,7 +43,7 @@ static int obstacleSeenAngle = -1;
 
 // ── Initialisation ───────────────────────────────────────────────────
 bool Head::begin() {
-  // Timers 2 et 3 : les 0 et 1 sont pris par les roues (wheels.cpp).
+  // Timers 2 et 3 : les 0 et 1 sont pris par les pieds (feet.cpp).
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
   servoPan.setPeriodHertz(50);   // 50 Hz = période 20 ms des SG90
