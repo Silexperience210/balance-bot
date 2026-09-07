@@ -101,13 +101,21 @@ constexpr float kFootTaperDeg  = 10.0f;
 // le sens OPPOSÉ : le robot roule dans cette direction et les pieds
 // reviennent vers 0. Cadence 2 Hz — plusieurs décades sous le PID, qui
 // garde donc toujours l'autorité sur l'équilibre.
+//
+// Valeurs ADOUCIES pour le premier essai debout (cf. sim_recentrage3.png) :
+// un balancebot penché de θ ACCÉLÈRE (a ≈ g·θ), il ne roule pas à vitesse
+// constante — un trim de ±1° lance déjà le robot à ~0.17 m/s². Pendant un
+// transitoire, ce trim s'oppose au rattrapage du PID et pousse le pied
+// vers la butée au lieu de l'en éloigner. On garde donc une autorité
+// minuscule et très lente : le recentrage ne doit corriger qu'une dérive
+// installée, jamais participer à l'équilibre.
 constexpr unsigned long kRecenterPeriodMs = 500;   // 2 Hz
-constexpr float        kRecenterDeadDeg  = 15.0f;  // en deçà : rien à faire
-constexpr unsigned long kRecenterHoldMs  = 300;    // …et il faut durer
-constexpr float        kRecenterTrimMax  = 1.0f;   // ±1° de consigne, pas plus
-constexpr float        kRecenterRateDegS = 0.30f;  // charge : ~3.3 s pour ±1°
-constexpr float        kRecenterDecayDegS= 0.20f;  // retour à 0 une fois recentré
-constexpr float        kFootPanicDeg     = 40.0f;  // butée imminente → halt()
+constexpr float        kRecenterDeadDeg  = 12.0f;  // en deçà : rien à faire
+constexpr unsigned long kRecenterHoldMs  = 800;    // …et il faut durer
+constexpr float        kRecenterTrimMax  = 0.4f;   // ±0.4° de consigne, pas plus
+constexpr float        kRecenterRateDegS = 0.10f;  // charge : ~4 s pour ±0.4°
+constexpr float        kRecenterDecayDegS= 0.08f;  // retour à 0 une fois recentré
+constexpr float        kFootPanicDeg     = 35.0f;  // butée imminente → halt()
 
 // ── Pilotage depuis l'UI ───────────────────────────────────────────
 // Avancer = incliner la consigne dans le sens de la marche.

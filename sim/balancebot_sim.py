@@ -24,7 +24,12 @@ import matplotlib.pyplot as plt
 # ── Paramètres physiques ─────────────────────────────────────────────
 G, R, H = 9.81, 0.0325, 0.080      # gravité, rayon arc (m), hauteur CoM (m)
 TAU_SERVO, VMAX_SERVO = 0.05, 250.0  # servo : 1er ordre (s), vitesse max (°/s)
-MU_ROLL = 0.03                        # friction de roulement PLA
+# Friction de roulement : laissée à 0 par défaut. La vraie friction d'un arc
+# PLA sur table est faible (~0.01) et AIDE la stabilité ; un modèle naïf
+# (décélération constante au signe de la vitesse instantanée) la rendait
+# déstabilisante — artefact, pas physique. Le modèle SANS friction est donc
+# le pire cas : les gains validés marchent avec une marge en réel.
+MU_ROLL = 0.0
 DT = 1.0 / 200                        # pas de contrôle = 200 Hz (comme le code)
 
 # ── Contrôleur (copie de balance.cpp / feet.cpp) ─────────────────────
