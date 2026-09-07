@@ -15,6 +15,8 @@ Résultats clés (commit ea68b1b) :
 - Kp=25 Ki=500 Kd=0.5 : tient debout, robuste au bruit, tapes modérées.
 - Recentrage par trim d'angle ±1° : fragile (balancebot penché = accélère,
   pas vitesse constante) → adouci dans le firmware (max ±0.4°, 0.10°/s).
+- Sensibilité (validée) : Kp25/Ki500/Kd0.5 tient pour h ∈ [50-100 mm] et
+  τ servo ≤ 100 ms. Robot complet tête+mât (h > 100 mm) : Kp40/Ki600/Kd1.5.
 """
 import math, random, sys
 import matplotlib

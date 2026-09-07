@@ -64,6 +64,7 @@ prochain réglage, PAS un bug).
 | Tombe mollement | ↑ kKp (25→40), ↑ kKi (500→700) |
 | Dérive avant/arrière constante | kTrimDegL/R (feet.cpp) ou neutre palonnier |
 | Recentrage trop lent | ↑ kRecenterTrimMax (0.4→0.8), ↑ kRecenterRateDegS |
+| Robot complet (tête + mât montés, CoM > 100 mm) | Essayer Kp 40, Ki 600, Kd 1.5 (sim : gains v1 tiennent h ≤ 100 mm) |
 
 ## Limites connues (à ne pas prendre pour des bugs)
 - Course du pied ±45° → une grosse tape fait « courir » le robot puis
