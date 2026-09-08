@@ -34,25 +34,25 @@ SR_W, SR_H, SR_T = 45.0, 20.0, 1.6       # HC-SR04 pcb
 SR_TR_D, SR_TR_PITCH, SR_TR_H = 16.0, 26.0, 12.0   # transducteurs Ø16, entraxe 26
 
 # ── Glyphe ₿ (face, mm) ──────────────────────────────────────────────────────
-GW, GH = 90.0, 170.0        # B hors barres
-Z0 = 20.0                   # bas du B (les pattes descendent à z = 10)
-SPINE_W = 18.0
-STROKE = 17.0               # trait des panses
-HIGH_SCALE = 0.86           # panse haute plus étroite que la basse
-BAR_W, BAR_H = 9.0, 15.0    # traits du ₿ (2 haut, 2 bas)
-BARS_X = (3.0, SPINE_W + 4.0)
-DEPTH = 40.0                # profondeur totale du corps
+GW, GH = 118.0, 165.0        # B hors barres (v3.1 : ratio 1.40)
+Z0 = 26.0                   # bas du B (v3.1)
+SPINE_W = 20.0
+STROKE = 19.0               # trait des panses (v3.1)
+HIGH_SCALE = 0.90           # panse haute (v3.1)
+BAR_W, BAR_H = 11.0, 22.0   # traits du ₿ (v3.1)
+BARS_X = (4.0, SPINE_W + 5.0)
+DEPTH = 46.0                # profondeur totale du corps (v3.1)
 WALL = 2.4
 CHAM = 1.2                  # chanfrein arêtes extérieures
 COUNTER = 3.0               # creux des contre-poinçons
-LEG_H = 10.0                # les barres du bas descendent jusqu'à z = Z0-LEG_H = 10 → garde au sol 10
+LEG_H = 14.0                # barres du bas → z = Z0-LEG_H = 12 → garde au sol 12 (v3.1)
 
 # ── Roues ────────────────────────────────────────────────────────────────────
-WHEEL_D, WHEEL_W = 70.0, 10.0
-GROOVE_D, GROOVE_W = 0.5, 8.4   # gorge de bande de roulement sur la jante
-TIRE_T, TIRE_W = 2.0, 8.0       # bande TPU pleine, montée en tension (Ø int. < Ø fond de gorge)
-TIRE_STRETCH = 0.8              # interférence diamétrale
-WHEEL_R = WHEEL_D/2 - GROOVE_D + TIRE_T   # 36.5 rayon de roulement → axe z
+WHEEL_D, WHEEL_W = 80.0, 8.0    # v3.1 : Ø80, allégée (6 bras, voir build_wheel)
+GROOVE_D, GROOVE_W = 0.5, 7.0   # gorge de bande de roulement sur la jante
+TIRE_T, TIRE_W = 2.5, 7.0       # bande TPU pleine, montée en tension (Ø int. < Ø fond de gorge)
+TIRE_STRETCH = 1.0              # interférence diamétrale
+WHEEL_R = WHEEL_D/2 - GROOVE_D + TIRE_T   # 41.5 rayon de roulement → axe z
 AXLE_Z = WHEEL_R
 HUB_BORE_D = SV_SHAFT_D + 0.4
 HUB_CB_D, HUB_CB_H = SV_BOSS_D + 0.6, SV_BOSS_H + 0.2
@@ -349,7 +349,7 @@ def split_body(env):
     pins = [(SPINE_W/2, Z0 + 12), (SPINE_W/2, Z0 + GH - 12),            # dans la cavité du spine (13.2 large : plot Ø9 soudé aux 2 murs)
             (cxL + rL - WALL - 4.0, czL), (cxH + rH - WALL - 4.0, czH)]  # adossés au mur courbe droit, à mi-hauteur
     screws = [(SPINE_W/2, Z0 + GH*0.30), (SPINE_W/2, Z0 + GH*0.72),
-              (cxL + rL*math.cos(math.radians(-45)) - WALL*1.2 - 3.5, czL + rL*math.sin(math.radians(-45)) + WALL*1.2 + 3.5),   # LOW : mur courbe à -45° (sous l'écran, à droite)
+              (70.0, 33.0),  # LOW : cavité basse, loin des servos (x≤25 / x≥82) et du MPU (x≤50) — pilier tenu par les parois Y + vis M3
               (cxH, HIGH['zt'] - WALL - 4.0)]   # HIGH : plafond
     # plots pleins traversant tout l'intérieur (les 2 coques en hériteront chacune sa moitié)
     for k, (px, pz) in enumerate(pins + screws):
