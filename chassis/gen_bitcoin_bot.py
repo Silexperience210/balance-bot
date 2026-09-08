@@ -44,7 +44,7 @@ BARS_X = (4.0, SPINE_W + 5.0)
 DEPTH = 46.0                # profondeur totale du corps (v3.1)
 WALL = 2.4
 CHAM = 1.2                  # chanfrein arêtes extérieures
-COUNTER = 3.0               # creux des contre-poinçons
+COUNTER = 1.6                 # creux des contre-poinçons (1.6 : supports minuscules, review v3.1)
 LEG_H = 14.0                # barres du bas → z = Z0-LEG_H = 12 → garde au sol 12 (v3.1)
 
 # ── Roues ────────────────────────────────────────────────────────────────────
@@ -173,8 +173,8 @@ def glyph_solids(y0, y1, inset=0.0):
     for k, b in enumerate((LOW, HIGH)):
         parts.append(prisme(f'bowl{k}', bowl(b['zb']+i, b['zt']-i, i, b['xr']-i), 'Y', y0, y1))
     for k, bx in enumerate(BARS_X):
-        parts.append(prisme(f'bart{k}', [(bx+i, Z0+GH-1), (bx+BAR_W-i, Z0+GH-1), (bx+BAR_W-i, Z0+GH+BAR_H-i), (bx+i, Z0+GH+BAR_H-i)], 'Y', y0, y1))
-        parts.append(prisme(f'barb{k}', [(bx+i, Z0-LEG_H+i), (bx+BAR_W-i, Z0-LEG_H+i), (bx+BAR_W-i, Z0+1), (bx+i, Z0+1)], 'Y', y0, y1))
+        parts.append(prisme(f'bart{k}', [(bx+i, Z0+GH-4), (bx+BAR_W-i, Z0+GH-4), (bx+BAR_W-i, Z0+GH+BAR_H-i), (bx+i, Z0+GH+BAR_H-i)], 'Y', y0, y1))  # ancrage 4 mm dans la panse (union robuste)
+        parts.append(prisme(f'barb{k}', [(bx+i, Z0-LEG_H+i), (bx+BAR_W-i, Z0-LEG_H+i), (bx+BAR_W-i, Z0+4), (bx+i, Z0+4)], 'Y', y0, y1))  # ancrage 4 mm dans la panse
     return fusionner('glyph', parts)
 
 def counters(y0, y1):
@@ -202,14 +202,25 @@ def corps_enveloppe():
     booleen(env, ctr, 'DIFFERENCE')
     return env
 
-def corps_cavite():
-    """Cavité intérieure = glyphe réduit de WALL, de y=-DEPTH/2+WALL à y=+DEPTH/2-WALL-COUNTER (derrière les creux)."""
-    return glyph_solids(-DEPTH/2 + WALL, DEPTH/2 - WALL - COUNTER, inset=WALL)
+def corps_cavite(y0=None, y1=None):
+    """Cavité intérieure = glyphe réduit de WALL, entre y0 et y1 (défaut : tout le corps)."""
+    if y0 is None: y0 = -DEPTH/2 + WALL
+    if y1 is None: y1 = DEPTH/2 - WALL - COUNTER
+    return glyph_solids(y0, y1, inset=WALL)
+
+SKIN = 0.6  # peau sacrificielle au joint : la cavité s'arrête à ±SKIN du plan y=0 → le corps reste PLEIN sur 1.2 mm,
+# ce qui FERME chaque coque après la coupe (mesh WATERFIGHT, exigé par le slicer Bambu : les coques ouvertes
+# sont rejetées « Nothing to be sliced »). Cette peau de 0.6 mm par moitié se coupe au cutter après impression
+# pour ouvrir la cavité (pattern v2 — coque « avec peau » validée par slice le 08/09).
 
 def build_body():
     env = corps_enveloppe()
-    cav = corps_cavite()
-    booleen(env, cav, 'DIFFERENCE')
+    booleen(env, corps_cavite(), 'DIFFERENCE')
+    # Peau sacrificielle du joint (±SKIN) : prisme PLEIN du glyphe qui ferme chaque coque → meshes acceptés par le
+    # slicer Bambu (les coques ouvertes sont rejetées « Nothing to be sliced »). Placée APRÈS la cavité et AVANT les
+    # soustractions : les tunnels (fenêtres servo, axes, vis) la percent ensuite. Se coupe au cutter après impression.
+    booleen(env, glyph_solids(-SKIN, SKIN, inset=WALL - 0.1), 'UNION')  # inset 2.3 : la peau CHEVAUCHE les parois de 0.1 mm (union franche, pas coplanaire)
+
 
     yf = DEPTH/2
     y_cav_f = yf - WALL - COUNTER          # fond de cavité côté avant (derrière les creux)
@@ -354,10 +365,12 @@ def split_body(env):
     # plots pleins traversant tout l'intérieur (les 2 coques en hériteront chacune sa moitié)
     for k, (px, pz) in enumerate(pins + screws):
         booleen(env, cylindre(f'plot{k}', 9.0, (y_cav_f - y_cav_b) + 2.0, 'Y', (px, (y_cav_f + y_cav_b)/2, pz)), 'UNION')
-    # avant-trous M3 percés AVANT la coupe (trou continu à travers le joint : les vis M3 sont traversantes).
-    # Percés après la coupe, EXACT échoue (résidus flottants) ; FAST plante.
+    # avant-trous M3 percés AVANT la coupe mais BORGNES dans le front (y 0.5 → 16.5) : ils ne traversent PAS le plan
+    # de joint y=0 → la coupe ne les recoupe pas → pas d'éventail de faces sur la face de joint (les pil traversants
+    # créaient des arêtes >2 faces qui faisaient rejeter le mesh par le slicer). La vis M3×30 (tête à y≈-16.4) va
+    # jusqu'à +13.6 : couverte. Le passage Ø3.4 du back (sc) traverse le joint et guide la vis jusqu'au pil.
     for k, (px, pz) in enumerate(screws):
-        booleen(env, cylindre(f'pil{k}', 2.6, DEPTH + 2.0, 'Y', (px, 0.0, pz)), 'DIFFERENCE')
+        booleen(env, cylindre(f'pil{k}', 2.6, 16.0, 'Y', (px, 8.5, pz)), 'DIFFERENCE')
 
     # coupe en 2 par booléen EXACT (la géométrie est assainie : tubes Ø26.5 sans sliver → la coupe redevient fiable et referme les faces)
     front = dupliquer(env, 'b_front'); back = env; back.name = 'b_back'
@@ -365,7 +378,7 @@ def split_body(env):
     booleen(back,  boite('cut_b', -60, 300, 0.02, 100, -60, 400), 'DIFFERENCE')     # garde y < 0
     for k, (px, pz) in enumerate(pins):
         booleen(back, cylindre(f'pin{k}', 5.8, 8.0, 'Y', (px, 2.0, pz)), 'UNION')         # goujon : y -2 → +6 (dépasse dans le front)
-        booleen(front, cylindre(f'hole{k}', 6.0, 7.2, 'Y', (px, 3.6 - EPS, pz)), 'DIFFERENCE')  # alésage Ø6.0 (traverse le joint de 0.2)
+        booleen(front, cylindre(f'hole{k}', 6.0, 8.8, 'Y', (px, 4.1, pz)), 'DIFFERENCE')  # alésage Ø6.0 : traverse la peau (-0.3→8.5), percé APRÈS la coupe (pas d'éventail)
     for k, (px, pz) in enumerate(screws):
         booleen(back, cylindre(f'sc{k}', 3.4, DEPTH + 0.4, 'Y', (px, -DEPTH/4 + 0.2, pz)), 'DIFFERENCE')   # passage M3 (traverse le joint)
         booleen(back, cylindre(f'sch{k}', 6.4, 3.6, 'Y', (px, yb + 1.8 - EPS, pz)), 'DIFFERENCE')  # tête noyée
