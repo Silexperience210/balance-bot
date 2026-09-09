@@ -117,6 +117,11 @@ static uint32_t g_touchSeq   = 0;
 // le tap sur STOP ré-armait le robot 16 ms plus tard, et l'armement au doigt
 // ouvrait l'écran STOP — FACE_REVIEW.md constats 2 et 7).
 static bool g_touchLatch = false;
+static uint8_t s_latchOff = 0;      // trames consécutives sans doigt (levée du verrou)
+static bool s_touchSkip = false;    // diagnostic : coupe la lecture I²C (A/B)
+static bool s_intGate   = false;    // ne lire que si INT actif (A/B, ?int=1)
+static unsigned long s_lastPoll = 0;
+constexpr unsigned long kTouchPollMs = 100;   // balayage de garde sans doigt
 
 // ── Boutons tactiles ──────────────────────────────────────────────
 struct TouchZone {
@@ -522,7 +527,35 @@ void readTouch() {
   const bool wasTouched = g_touchedRaw;
   g_touchedRaw = false;
   g_touchX = -1; g_touchY = -1;
-  if (!g_touch || !g_touch->read()) return;
+  if (s_touchSkip) return;            // diagnostic A/B (cf. /api/touch?skip=1)
+
+  // Garde INT (optionnelle, /api/touch?int=1) : ne lire le contrôleur que
+  // si la broche INT signale un doigt, ou toutes les kTouchPollMs pour ne
+  // pas rater un tap court. Évite de réveiller le CST816 pour rien.
+  const bool intActif = (digitalRead(PIN_TOUCH_INT) == LOW);
+  if (s_intGate && !intActif && !wasTouched &&
+      (millis() - s_lastPoll) < kTouchPollMs) {
+    if (g_touchLatch && ++s_latchOff >= 2) { g_touchLatch = false; s_latchOff = 0; }
+    return;
+  }
+  s_lastPoll = millis();
+  // Chronométrage de la transaction I²C du CST816 : c'est le seul appel de
+  // Ui::loop() qui peut attendre un esclave (le reste est du dessin borné).
+  const unsigned long tI2c = micros();
+  const bool ok = g_touch && g_touch->read();
+  {
+    const unsigned long dt = (micros() - tI2c) / 1000UL;
+    if (dt > g_state.dbgTouchMaxMs) g_state.dbgTouchMaxMs = (uint16_t)min(dt, 65535UL);
+  }
+  if (!ok) {
+    // Aucun doigt : c'est ICI que le verrou de changement de mode doit être
+    // levé (2 trames sans doigt pour absorber une lecture I²C ratée). Le
+    // lever plus bas était un bug : la fonction sortait avant, donc le
+    // verrou restait armé à vie et avalait TOUS les taps (plus de STOP).
+    if (g_touchLatch && ++s_latchOff >= 2) { g_touchLatch = false; s_latchOff = 0; }
+    return;
+  }
+  s_latchOff = 0;
 
   // MULTI-TOUCH : le contrôleur peut annoncer 2 points ; on ne garde QUE le
   // point 0. getPoint(1) est de toute façon inutilisable : TouchLib le lit
@@ -613,7 +646,10 @@ void uiAutoLoop() {
       s_stopShown = false; s_drawnValid = false; return;
     }
     if (s_stopStep < 2) {                            // dessin en 2 images
+      const unsigned long t0 = micros();
       if (s_stopStep == 0) faceStopStep0(); else faceStopStep1();
+      const unsigned long dt = (micros() - t0) / 1000UL;
+      if (dt > g_state.dbgDrawMaxMs) g_state.dbgDrawMaxMs = (uint16_t)min(dt, 65535UL);
       s_stopStep++;
       s_lastDraw = now;
       return;
@@ -687,7 +723,10 @@ void uiAutoLoop() {
   if (structChanged) {
     s_drawn = f;
     s_drawnValid = true;
+    const unsigned long t0 = micros();
     faceDraw(f, &s_irisL, &s_irisR);
+    const unsigned long dt = (micros() - t0) / 1000UL;
+    if (dt > g_state.dbgDrawMaxMs) g_state.dbgDrawMaxMs = (uint16_t)min(dt, 65535UL);
     return;
   }
   if (gazeQ(f.gaze) == gazeQ(s_drawn.gaze)) return;  // rien n'a bougé
@@ -695,8 +734,11 @@ void uiAutoLoop() {
   const IrisGeom nl = faceIrisGeom(FACE_CX_L, +1, f);
   const IrisGeom nr = faceIrisGeom(FACE_CX_R, -1, f);
   const uint16_t col = f.red ? C_RED : C_ORANGE;
+  const unsigned long t0 = micros();
   faceMoveIris(s_irisL, nl, col);
   faceMoveIris(s_irisR, nr, col);
+  const unsigned long dt = (micros() - t0) / 1000UL;
+  if (dt > g_state.dbgDrawMaxMs) g_state.dbgDrawMaxMs = (uint16_t)min(dt, 65535UL);
   s_irisL = nl;
   s_irisR = nr;
 }
@@ -772,6 +814,9 @@ static void drawStatic() {
   for (int i = 0; i < g_zoneCount; i++) drawButton(i);
 }
 
+void Ui::setTouchSkip(bool skip) { s_touchSkip = skip; }
+void Ui::setIntGate(bool on)     { s_intGate = on; }
+
 // Diagnostic tactile — cf. TOUCH_REVIEW.md §4.
 Ui::TouchDebug Ui::touchDebug() {
   Ui::TouchDebug d;
@@ -800,6 +845,22 @@ bool Ui::begin() {
     g_touch = nullptr;
   } else {
     g_touch->setRotation(1);  // aligne le repère touch sur le paysage
+
+    // ── Anti-blocage du CST816 (enquête cadence 09/09) ───────────────
+    // Mesuré : ~1 lecture sur 60 tient le bus I²C ~1000 ms (le driver
+    // attend l'esclave pendant son cycle de veille), ce qui gelait la
+    // boucle d'équilibre (chutes à 1-50 Hz, 21 chutes en 60 s). Le
+    // registre 0xFE = DisAutoSleep du CST816S désactive cette veille.
+    Wire.beginTransmission(CTS820_SLAVE_ADDRESS);
+    Wire.write((uint8_t)0xFE);
+    Wire.write((uint8_t)0x01);
+    const bool okSleep = (Wire.endTransmission() == 0);
+    // Lecture conditionnée par la broche INT (le contrôleur tire INT à la
+    // masse quand un doigt est posé) : quand elle est active, on lit
+    // vraiment à 60 Hz ; sinon on se contente d'un balayage de garde.
+    pinMode(PIN_TOUCH_INT, INPUT_PULLUP);
+    Serial.printf("UI TOUCH  : auto-sleep %s, INT=%d\n",
+                  okSleep ? "désactivé" : "ÉCRITURE RATÉE", digitalRead(PIN_TOUCH_INT));
   }
 
   // Le tactile peut manquer (nappe débranchée) : l'écran reste utile en

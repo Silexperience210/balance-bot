@@ -175,17 +175,32 @@ void handleState() {
   float kp, ki, kd, kpPhi, kv;
   Balance::getGains(kp, ki, kd);
   Balance::getRecenterGains(kpPhi, kv);
-  char buf[256];
+  char buf[384];
   snprintf(buf, sizeof(buf),
            "{\"pitch\":%.1f,\"rate\":%.0f,\"footL\":%d,\"footR\":%d,"
            "\"hz\":%.0f,\"kp\":%.1f,\"ki\":%.0f,\"kd\":%.2f,"
            "\"kpphi\":%.1f,\"kv\":%.1f,"
-           "\"balancing\":%d,\"up\":%d,\"ui\":%u,\"s\":%lu}",
+           "\"balancing\":%d,\"up\":%d,\"ui\":%u,\"s\":%lu,"
+           "\"gap\":%u,\"gph\":%u,\"loop\":%u,\"bal\":%u,\"head\":%u,"
+           "\"bat\":%u,\"stalls\":%u,\"worst\":%u,"
+           "\"big\":%u,\"lgap\":%u,\"lgph\":%u,\"lglp\":%u,"
+           "\"balmax\":%u,\"uimax\":%u,\"headmax\":%u,\"batmax\":%u,\"loopmax\":%u,"
+           "\"touchmax\":%u,\"drawmax\":%u}",
            g_state.pitchDeg, Balance::pitchRateDps(),
            g_state.footLDeg, g_state.footRDeg, g_state.balanceHz,
            kp, ki, kd, kpPhi, kv,
            Balance::isEnabled() ? 1 : 0, g_state.balancing ? 1 : 0,
-           (unsigned)g_state.dbgUiMs, millis() / 1000UL);
+           (unsigned)g_state.dbgUiMs, millis() / 1000UL,
+           (unsigned)g_state.dbgGapMs, (unsigned)g_state.dbgGapPhase,
+           (unsigned)g_state.dbgLoopMs, (unsigned)g_state.dbgBalMs,
+           (unsigned)g_state.dbgHeadMs, (unsigned)g_state.dbgBatMs,
+           (unsigned)g_state.dbgStalls, (unsigned)g_state.dbgWorstMs,
+           (unsigned)g_state.dbgBigGaps, (unsigned)g_state.dbgLastGapMs,
+           (unsigned)g_state.dbgLastGapPhase, (unsigned)g_state.dbgLastGapLoopMs,
+           (unsigned)g_state.dbgBalMaxMs, (unsigned)g_state.dbgUiMaxMs,
+           (unsigned)g_state.dbgHeadMaxMs, (unsigned)g_state.dbgBatMaxMs,
+           (unsigned)g_state.dbgLoopMaxMs,
+           (unsigned)g_state.dbgTouchMaxMs, (unsigned)g_state.dbgDrawMaxMs);
   s_server.send(200, "application/json", buf);
 }
 
@@ -211,6 +226,12 @@ float argOrNan(const char* name) {
 // La valeur est RÉMANENTE : taper un coin, puis charger cette page.
 void handleTouch() {
   touchReq();
+  if (s_server.hasArg("skip")) {
+    Ui::setTouchSkip(s_server.arg("skip").toInt() != 0);
+  }
+  if (s_server.hasArg("int")) {
+    Ui::setIntGate(s_server.arg("int").toInt() != 0);
+  }
   const Ui::TouchDebug t = Ui::touchDebug();
   char buf[192];
   snprintf(buf, sizeof(buf),

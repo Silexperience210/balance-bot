@@ -48,6 +48,29 @@ void setup() {
 
 void loop() {
   const unsigned long nowMs = millis();
+  const unsigned long loopT0 = micros();
+
+  // ── Diagnostic de cadence (enquête 09/09) ───────────────────────
+  // L'écart entre deux départs de loop() dit si la boucle a été retardée ;
+  // la durée du corps (loopT0) dit si le retard vient de DEDANS. Les deux
+  // ensemble séparent « phase lente » de « blocage externe » (WiFi, cache
+  // flash, interruptions). s_lastPhase = dernière phase exécutée.
+  static uint8_t       s_lastPhase = 5;
+  static unsigned long tPrevLoop   = 0;
+  static uint8_t       s_prevLoopMs = 0;
+  const unsigned long gap = nowMs - tPrevLoop;
+  tPrevLoop = nowMs;
+  if (gap > g_state.dbgGapMs) {
+    g_state.dbgGapMs   = (uint16_t)min(gap, 65535UL);
+    g_state.dbgGapPhase = s_lastPhase;
+  }
+  if (gap > g_state.dbgWorstMs) g_state.dbgWorstMs = (uint16_t)min(gap, 65535UL);
+  if (gap > 100) {                     // gros décrochage : on garde sa signature
+    g_state.dbgBigGaps++;
+    g_state.dbgLastGapMs     = (uint16_t)min(gap, 65535UL);
+    g_state.dbgLastGapPhase  = s_lastPhase;
+    g_state.dbgLastGapLoopMs = s_prevLoopMs;
+  }
 
   // ── Boucle d'équilibre : 200 Hz ─────────────────────────────────
   // Toujours active même à l'arrêt : Balance::loop() mesure l'IMU en
@@ -56,7 +79,12 @@ void loop() {
   static unsigned long tBalance = 0;
   if (nowMs - tBalance >= (1000UL / BALANCE_LOOP_HZ)) {
     tBalance = nowMs;
+    unsigned long t0 = micros();
     Balance::loop();
+    unsigned long dt = (micros() - t0) / 1000UL;
+    if (dt > g_state.dbgBalMs) g_state.dbgBalMs = (uint8_t)min(dt, 255UL);
+    if (dt > g_state.dbgBalMaxMs) g_state.dbgBalMaxMs = (uint16_t)min(dt, 65535UL);
+    s_lastPhase = 0;
   }
 
   // ── UI : 60 Hz (au lieu de « en continu ») ───────────────────────
@@ -71,6 +99,7 @@ void loop() {
     Ui::loop();
     unsigned long dt = (micros() - t0) / 1000UL;  // ms arrondi bas
     if (dt > g_state.dbgUiMs) g_state.dbgUiMs = (uint8_t)min(dt, 255UL);
+    if (dt > g_state.dbgUiMaxMs) g_state.dbgUiMaxMs = (uint16_t)min(dt, 65535UL);
   }
 
   // ── Tête + ultrason : 50 Hz (l'ultrason est auto-cadencé à 10 Hz
@@ -82,6 +111,8 @@ void loop() {
     Head::loop();
     unsigned long dt = (micros() - t0) / 1000UL;
     if (dt > g_state.dbgHeadMs) g_state.dbgHeadMs = (uint8_t)min(dt, 255UL);
+    if (dt > g_state.dbgHeadMaxMs) g_state.dbgHeadMaxMs = (uint16_t)min(dt, 65535UL);
+    s_lastPhase = 2;
   }
 
   // ── Banc de réglage web ─────────────────────────────────────────
@@ -98,6 +129,7 @@ void loop() {
   } else if (bootNow && !bootDone && (nowMs - bootDownMs >= 1500)) {
     bootDone = true;
     Serial.printf("BANC WEB  : %s\n", Tuner::toggle() ? "OUVERT" : "FERMÉ");
+    s_lastPhase = 3;
   }
   bootPrev = bootNow;
 
@@ -105,10 +137,29 @@ void loop() {
   static unsigned long tBat = 0;
   if (nowMs - tBat >= 1000) {
     tBat = nowMs;
+    unsigned long t0 = micros();
     g_state.batteryV = Battery::readVolts();   // -1 = USB seul, pas de batterie
     g_state.batteryLow = Battery::isLow();
+    unsigned long dt = (micros() - t0) / 1000UL;
+    if (dt > g_state.dbgBatMs) g_state.dbgBatMs = (uint8_t)min(dt, 255UL);
+    if (dt > g_state.dbgBatMaxMs) g_state.dbgBatMaxMs = (uint16_t)min(dt, 65535UL);
+    s_lastPhase = 4;
     // Fenêtre de debug écoulée : on repart de zéro pour la seconde suivante
     g_state.dbgUiMs = 0;
     g_state.dbgHeadMs = 0;
+    g_state.dbgBalMs = 0;
+    g_state.dbgBatMs = 0;
+    g_state.dbgGapMs = 0;
+    g_state.dbgLoopMs = 0;
+    if (g_state.balanceHz > 0.0f && g_state.balanceHz < 120.0f) g_state.dbgStalls++;
+  }
+
+  // Durée du corps de loop() : si elle reste petite alors que l'écart entre
+  // deux départs explose, le retard vient de l'extérieur de loop().
+  {
+    unsigned long dt = (micros() - loopT0) / 1000UL;
+    if (dt > g_state.dbgLoopMs) g_state.dbgLoopMs = (uint8_t)min(dt, 255UL);
+    if (dt > g_state.dbgLoopMaxMs) g_state.dbgLoopMaxMs = (uint16_t)min(dt, 65535UL);
+    s_prevLoopMs = g_state.dbgLoopMs;
   }
 }

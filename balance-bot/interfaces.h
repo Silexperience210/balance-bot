@@ -16,6 +16,29 @@ struct BotState {
   int   footRDeg  = 0;       // angle du pied droit  (idem)
   uint8_t dbgUiMs  = 0;      // pire temps d'Ui::loop (ms, dernière seconde)
   uint8_t dbgHeadMs = 0;     // pire temps de Head::loop (ms, dernière seconde)
+  // Diagnostic de cadence (enquête 09/09 : chutes de balanceHz) — permet de
+  // distinguer « le corps de loop() a duré longtemps » (phase nommée par
+  // dbgGapPhase) de « le départ de loop() a été retardé de l'extérieur »
+  // (dbgLoopMs reste petit, cause = interruption/WiFi/cache flash).
+  uint16_t dbgGapMs   = 0;   // plus grand écart entre 2 départs de loop() (s en cours)
+  uint16_t dbgWorstMs = 0;   // plus grand écart depuis le boot
+  uint8_t  dbgGapPhase = 5;  // phase exécutée avant l'écart (0 bal,1 ui,2 head,3 boot,4 bat,5 autre)
+  uint8_t  dbgLoopMs  = 0;   // pire durée d'un corps de loop() (s en cours)
+  uint8_t  dbgBalMs   = 0;   // pire durée de Balance::loop() (s en cours)
+  uint8_t  dbgBatMs   = 0;   // pire durée de la lecture batterie (s en cours)
+  uint16_t dbgStalls  = 0;   // secondes où balanceHz < 120 (hors 0)
+  // Signature du DERNIER gros écart (> 100 ms) : dit si la boucle était
+  // lente (corps long) ou seulement privée de CPU (corps court).
+  uint16_t dbgBigGaps = 0;   // nombre d'écarts > 100 ms depuis le boot
+  uint16_t dbgLastGapMs = 0;
+  uint8_t  dbgLastGapPhase = 5;
+  uint8_t  dbgLastGapLoopMs = 0;
+  // Max CUMULATIFS (jamais remis à zéro) : la remise à zéro par seconde
+  // effaçait justement la preuve pendant la seconde de la chute.
+  uint16_t dbgBalMaxMs = 0, dbgUiMaxMs = 0, dbgHeadMaxMs = 0, dbgBatMaxMs = 0;
+  uint16_t dbgLoopMaxMs = 0;
+  uint16_t dbgTouchMaxMs = 0;  // pire g_touch->read() (I2C CST816) — cumulatif
+  uint16_t dbgDrawMaxMs  = 0;  // pire bloc de dessin dans Ui::loop() — cumulatif
   float batteryV  = 0.0f;    // tension batterie (-1 = aucune batterie plausible : USB seul)
   bool  batteryLow = false;  // vrai si lecture valide ET sous BAT_LOW_V
   // commandes UI (module B) — consommées par la boucle d'équilibre

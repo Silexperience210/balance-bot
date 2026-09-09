@@ -22,6 +22,8 @@ namespace Ui {
     bool     mirrorX, mirrorY;     // drapeaux actifs dans le binaire courant
   };
   TouchDebug touchDebug();
+  void  setTouchSkip(bool skip);     // diagnostic : coupe la lecture I²C du touch
+  void  setIntGate(bool on);         // diagnostic : ne lire que si INT est actif
 
   // Boucle principale : lecture tactile + rendu (appelée souvent)
   void  loop();
