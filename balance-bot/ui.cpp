@@ -532,6 +532,13 @@ void readTouch() {
   if (g_touch->getPointNum() == 0) return;
   const TP_Point p = g_touch->getPoint(0);
 
+  // Trame poubelle : le CST816 émet régulièrement (4095, 4095) = 0xFFF, son
+  // motif « pas de donnée » — mesuré au banc (tools/touch_log.json, 3 trames
+  // sur 11). Sans ce rejet, chaque trame fantôme passait pour un appui et
+  // ouvrait l'écran STOP en mode AUTO. Marge large (WIDTH+40) pour ne pas
+  // jeter un vrai tap sur le bord du verre.
+  if (p.x > WIDTH + 40 || p.y > HEIGHT + 40) return;
+
   // ── Repère brut → repère écran (paysage 320×170, tft.setRotation(3)) ──
   // Le point sort de TouchLib DÉJÀ transposé par son setRotation(1) :
   // p.x court le long des 320 px, p.y en travers des 170 px. Mais la
@@ -555,15 +562,14 @@ void readTouch() {
   g_touchX = (int16_t)x;
   g_touchY = (int16_t)y;
 
-  // Diagnostic : brut tel que rendu par TouchLib + transformé.
+  // Diagnostic : brut tel que rendu par TouchLib + transformé (lu par
+  // /api/touch). PAS de Serial.printf ici : cette fonction tourne à 60 Hz
+  // dans la boucle d'équilibre, et une écriture USB-CDC bloque dès que
+  // l'hôte ne draine pas le port — c'est exactement le genre d'appel qui
+  // peut figer la boucle.
   g_touchRawX  = (int16_t)p.x;  g_touchRawY  = (int16_t)p.y;
   g_touchLastX = g_touchX;      g_touchLastY = g_touchY;
-  if (!wasTouched) {
-    g_touchSeq++;
-    Serial.printf("TOUCH     : brut=(%d,%d) ecran=(%d,%d) n=%lu\n",
-                  (int)p.x, (int)p.y, (int)g_touchX, (int)g_touchY,
-                  (unsigned long)g_touchSeq);
-  }
+  if (!wasTouched) g_touchSeq++;
 
   // Verrou de changement de mode : on consomme l'appui en cours jusqu'au
   // relâchement (le point reste mémorisé pour le diagnostic).
