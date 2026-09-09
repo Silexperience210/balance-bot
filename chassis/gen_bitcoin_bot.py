@@ -27,7 +27,7 @@ SV_FLANGE_Z, SV_FLANGE_T, SV_TAB_SPAN = 15.9, 2.5, 32.2
 SV_HOLE_PITCH, SV_SHAFT_OFF = 27.8, 5.9
 SV_SHAFT_D, SV_SHAFT_PROJ, SV_BOSS_D, SV_BOSS_H = 4.8, 4.5, 11.8, 1.5
 SV_PILOT_D = 1.7
-PCB_LEN, PCB_WID, PCB_T = 60.78, 25.51, 1.20
+PCB_LEN, PCB_WID, PCB_T = 62.00, 26.00, 1.20   # T-Display-S3 Touch RÉEL 62×26 (confirmé user 08/09 soir)
 PCB_FIX_PITCH = 20.01                    # trous réels de la carte
 MPU_L, MPU_W, MPU_T, MPU_HOLE_PITCH = 21.0, 16.0, 2.0, 15.0
 SR_W, SR_H, SR_T = 45.0, 20.0, 1.6       # HC-SR04 pcb
@@ -131,6 +131,38 @@ def soustraire(cible, outils):
 def dupliquer(ob, nom):
     cp = ob.copy(); cp.data = ob.data.copy(); cp.name = nom; bpy.context.collection.objects.link(cp); return cp
 
+def purger_dechets(ob, min_dim=0.05):
+    """Supprime les composantes à ÉPAISSEUR NULLE (voiles/plaques d'un seul plan) laissées par les
+    booléens EXACT quand une face de l'outil est coplanaire à une face du corps — ex. un alésage dont
+    le fond tombait pile sur le bout du tube, ou le capuchon d'un outil traversant. Connectivité par
+    ARÊTES (un voile relié seulement par un sommet n'appartient pas au solide). La matière réelle
+    (min_dim ≥ 1 mm) n'est jamais touchée."""
+    bm = bmesh.new(); bm.from_mesh(ob.data)
+    bm.faces.ensure_lookup_table(); bm.faces.index_update()
+    vus, a_supprimer, gardees = set(), [], 0
+    for f in bm.faces:
+        if f.index in vus:
+            continue
+        pile, comp = [f], []
+        vus.add(f.index)
+        while pile:
+            g = pile.pop(); comp.append(g)
+            for e in g.edges:
+                for h in e.link_faces:
+                    if h.index not in vus:
+                        vus.add(h.index); pile.append(h)
+        vs = {v for g in comp for v in g.verts}
+        dims = [max(v.co[i] for v in vs) - min(v.co[i] for v in vs) for i in range(3)]
+        if min(dims) < min_dim:
+            a_supprimer.extend(comp)
+        else:
+            gardees += 1
+    if a_supprimer:
+        bmesh.ops.delete(bm, geom=a_supprimer, context='FACES')
+        print(f"  [purge] {ob.name}: {len(a_supprimer)} faces à épaisseur nulle supprimées ({gardees} solide(s) gardé(s))")
+    bm.to_mesh(ob.data); bm.free()
+    return ob
+
 def nettoyer(ob):
     bpy.context.view_layer.objects.active = ob; bpy.ops.object.select_all(action='DESELECT'); ob.select_set(True)
     bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
@@ -138,7 +170,8 @@ def nettoyer(ob):
     bpy.ops.mesh.dissolve_degenerate()          # élimine triangles/arêtes dégénérés (artefacts EXACT sur la face de joint)
     bpy.ops.mesh.delete_loose()                 # sommets/arêtes isolés
     bpy.ops.mesh.normals_make_consistent(inside=False)
-    bpy.ops.object.mode_set(mode='OBJECT'); ob.select_set(False); return ob
+    bpy.ops.object.mode_set(mode='OBJECT'); ob.select_set(False)
+    return purger_dechets(ob)
 
 def bbox(ob):
     cs = [ob.matrix_world @ Vector(c) for c in ob.bound_box]
@@ -216,10 +249,10 @@ SKIN = 0.6  # peau sacrificielle au joint : la cavité s'arrête à ±SKIN du pl
 def build_body():
     env = corps_enveloppe()
     booleen(env, corps_cavite(), 'DIFFERENCE')
-    # Peau sacrificielle du joint (±SKIN) : prisme PLEIN du glyphe qui ferme chaque coque → meshes acceptés par le
-    # slicer Bambu (les coques ouvertes sont rejetées « Nothing to be sliced »). Placée APRÈS la cavité et AVANT les
-    # soustractions : les tunnels (fenêtres servo, axes, vis) la percent ensuite. Se coupe au cutter après impression.
-    booleen(env, glyph_solids(-SKIN, SKIN, inset=WALL - 0.1), 'UNION')  # inset 2.3 : la peau CHEVAUCHE les parois de 0.1 mm (union franche, pas coplanaire)
+    # PEAU SACRIFICIELLE DÉSACTIVÉE (SKIN=0.6 en constante, union commentée le 08/09 soir) : l'utilisateur a validé la
+    # version « CREUSE » — les 2 coques restent OUVERTES au plan de joint, le hardware se monte par l'ouverture avant de
+    # visser (4 goujons + 4 vis M3). Les coques ouvertes se slicent dans Bambu Studio GUI (le CLI headless les refuse).
+    # booleen(env, glyph_solids(-SKIN, SKIN, inset=WALL - 0.1), 'UNION') (union franche, pas coplanaire)
 
 
     yf = DEPTH/2
@@ -309,10 +342,13 @@ def build_body():
     #    le bossage/axe/palonnier du servo est dans le moyeu).
     # ── Alésages des tubes-paliers LIMITÉS AU TUBE (ne touchent pas la paroi : quasi-coplanarités → EXACT instable)
     #    Ø BEAR_D de 79.2 (fond, après l'épaulement d'ancrage) à 92.5 ; côté gauche de -12.5 à -0.2.
-    outils.append(cylindre('bearR', BEAR_D, 92.5 - 79.2, 'X', ((92.5 + 79.2)/2, 0.0, AXLE_Z)))
-    outils.append(cylindre('bearL', BEAR_D, -0.2 - (-12.5), 'X', ((-0.2 + (-12.5))/2, 0.0, AXLE_Z)))
+    #    Les alésages DÉPASSENT le bout des tubes de 2 mm (09/09) : un fond d'alésage coplanaire au bout
+    #    du tube laissait un voile Ø24.5 d'épaisseur nulle dans le palier (artefact EXACT → moyeu freiné).
+    x_bearR_out, x_bearL_out = x_in_R + 2.5, -14.0
+    outils.append(cylindre('bearR', BEAR_D, x_bearR_out - (x_wall_R + 0.2), 'X', ((x_bearR_out + (x_wall_R + 0.2))/2, 0.0, AXLE_Z)))  # palier droit : entrée x_in_R+0.5 → fond x_wall_R+0.2 (épaulement 1.6 mm, symétrique de bearL)
+    outils.append(cylindre('bearL', BEAR_D, -0.2 - x_bearL_out, 'X', ((-0.2 + x_bearL_out)/2, 0.0, AXLE_Z)))
     # ── Trou de passage du bossage servo (Ø 11.8 + jeu) à TRAVERS la paroi seulement, pour rejoindre l'alésage
-    outils.append(cylindre('axR', SV_BOSS_D + 1.0, 79.4 - 76.2, 'X', ((79.4 + 76.2)/2, 0.0, AXLE_Z)))
+    outils.append(cylindre('axR', SV_BOSS_D + 1.0, WALL + 0.6, 'X', (x_wall_R - WALL/2, 0.0, AXLE_Z)))  # de x_wall_R-WALL-0.3 (cavité) à x_wall_R+0.3 (tube) : traverse la paroi ENTIÈRE (valeur review Grok)
     outils.append(cylindre('axL', SV_BOSS_D + 1.0, 2.6 - (-0.4), 'X', ((2.6 + (-0.4))/2, 0.0, AXLE_Z)))
     # ── Fenêtres servo dans les cloisons (SV_L × SV_W + jeu) + avant-trous Ø1.7 des pattes (entraxe 27.8 selon Z)
     for x_face, d, x_bulk_in in servo_x:
@@ -323,7 +359,7 @@ def build_body():
         for sz in (-1, 1):
             outils.append(cylindre('svpil', SV_PILOT_D, 6.0, 'X', (x_bulk_in - d*2.0, 0.0, z_mid + sz*SV_HOLE_PITCH/2)))
     # ── Interrupteur à glissière 13 × 8 à l'arrière (spine, z ≈ 150)
-    outils.append(boite('sw', SPINE_W/2 - 6.5, SPINE_W/2 + 6.5, -DEPTH/2 - 1, y_cav_b + 1, 148, 156))
+    outils.append(boite('sw', SPINE_W/2 - 6.5, SPINE_W/2 + 6.5, -DEPTH/2 - 1, y_cav_b + 1, 160, 168))  # z 160-168 : au-dessus du plot screw spine (fin 149.3) → plus de lame non-manifold
     # ── Passe-fils entre panse basse et haute : ouverture dans la cloison à z = Z_MID
     outils.append(boite('pass', SPINE_W + 4, SPINE_W + 16, y_cav_b - 1, y_cav_f + 1, Z_MID - 6, Z_MID + 6))
     soustraire(env, outils)

@@ -1,16 +1,17 @@
 # ₿ BalanceBot v3 — NOTES DE CONCEPTION (châssis symbole Bitcoin)
 
-## Pièces (dans chassis/v3/)
-| Fichier | Rôle | Dimensions | Masse PETG |
+## Pièces (dans chassis/v3/) — cotes MESURÉES (09/09/2026)
+| Fichier | Rôle | Dimensions (bbox mm) | Masse PETG (100 %) |
 |---|---|---|---|
-| b_front.stl | Coque avant (face ₿, écran, yeux) | 104 × 20 × 195 | ~113 g |
-| b_back.stl | Coque arrière (élec., goujons) | 104 × 26 × 195 (goujons +6) | ~89 g |
-| coin_wheel.stl ×2 | Roues-pièces ₿ Ø70, ₿ gravé | Ø70 × 10 + moyeu Ø24×13 | ~52 g |
-| coin_tire.stl ×2 | Bandes TPU (TPU 95A) | Ø int 68.1 × 8 | ~4 g |
+| b_front.stl | Coque avant (face ₿, écran, yeux) | 132,1 × 23,0 × 201,0 | 134 g |
+| b_back.stl | Coque arrière (élec., goujons) | 132,1 × 29,0 × 201,0 | 116 g |
+| coin_wheel.stl ×2 | Roues-pièces ₿ Ø80 × 10 + moyeu Ø24×13 | Ø80 × 21 | 54 g |
+| coin_tire.stl ×2 | Bandes TPU (TPU 95A) | Ø83 × 7 | 5,6 g TPU |
 
-Total ~305 g PETG + 8 g TPU. Corps : glyphe ₿ 90 × 170 (hors barres) + barres 15 → 205 de haut.
-Voie des roues (plans médians) : ≈ 108 mm (centres x −17,5 / +96 après miroir) — légère asymétrie
-compensée par la masse (corps centré ~45, la batterie côté spine).
+Total ≈ 378 g (367 g PETG + 11 g TPU). Corps : glyphe ₿ 118 × 165 (GW × GH) + barres → 201 de haut,
+profondeur 46 (23 + 23) + goujons 6. Voie des roues (plans médians) : ≈ 108 mm.
+**Coques CREUSES** (pas de peau au joint) : la cavité s'ouvre sur le plan de joint y=0, le hardware
+se monte par l'ouverture avant vissage (4 goujons + 4 vis M3).
 
 ## Montage
 1. Servos 9 g continus (SG90-FS90R size) TÊTE EN BAS, collés à leur paroi : face de sortie contre la paroi
@@ -33,15 +34,44 @@ compensée par la masse (corps centré ~45, la batterie côté spine).
 9. Interrupteur : lumière 13 × 8 côté arrière du spine (z 148-156).
 
 ## Orientation d'impression (P1S, plateau 256 × 256)
-- b_front / b_back : face externe sur le plateau (creux vers le haut), zéro support (le creux COUNTER de la
-  face ₿ n'est pas imprimé en l'air : la face externe EST le plateau). Goujons/plots vers le haut.
+- b_front / b_back : face externe sur le plateau (creux vers le haut). Le creux COUNTER de la face ₿
+  n'est PAS imprimé en l'air (la face externe EST le plateau) ; les 2 panse-creux (5 831 mm² à 1,6 mm)
+  se pontent. Goujons/plots vers le haut. Hauteur d'impression 23 (front) / 29 (back) → ça rentre large.
 - coin_wheel : face externe (₿ gravé) sur le plateau → la gravure sort en relief (creux du moule) ;
-  moyeu vers le haut. PETG, couches 0.2.
+  moyeu vers le haut. PETG.
 - coin_tire : à plat (anneau). TPU 95A.
-- Attention : le corps est large (104) mais rentre (plateau 256) ; hauteur d'impression ~195 pour les coques
-  couchées → NON : couchée, la hauteur = 40 mm de large ? La coque couchée sur sa face externe (plan y=20) :
-  dimensions au sol 104 (x) × 195 (z→y) → TROP GRAND pour 256 ? 195 < 256 ✓ ça rentre (104 × 195 au sol).
-  Temps estimé b_front ~3h30, b_back ~3h à 0.2 PETG.
+- **Plaques de slicing** : `export/v31/plate1_b_front.stl` (201 × 132 au sol), `plate2_b_back.stl`,
+  `plateR_wheel1/2.stl`, `plateT_tire1/2.stl`. **À RÉGÉNÉRER après tout changement** :
+  `python3 chassis/make_plates.py` (transformations vérifiées : 100 % des sommets alignés).
+  Les plaques de 14h44 du 08/09 étaient périmées (version FERMÉE + alésage de palier bouché).
+- Le CLI headless refuse les coques > ~195 mm (dimension 201) → **slicer en GUI Bambu Studio**.
+
+## Réglages de slicing recommandés (P1S, PETG 0,4 mm)
+| Réglage | Coques (front/back) | Roue | Pneu |
+|---|---|---|---|
+| Hauteur de couche | **0,28** (−30 % de temps) | 0,20 (gravure ₿) | 0,24 |
+| Parois | 6 (épaisseur 2,4 mm = la pièce) | 4 | 3 |
+| Remplissage | n/a (parois pleines) | 20 % gyroid | 15 % gyroid |
+| Support | **aucun** (ponts internes) | aucun | aucun |
+| Adhérence | bordure (brim) 5 mm, lit 70-80 °C | brim 5 mm | brim 5 mm |
+| Ponts | débit 0,9 · 25 mm/s · ventilo 100 % | idem | — |
+| Divers | 1re couche 0,24 · « éviter de traverser les parois » | — | vitesse TPU 25 mm/s |
+
+Surplombs réels mesurés (hors faces posées sur le plateau) : 6,7 k mm² (front, dont 5,8 k = fond des
+creux ₿ à 1,6 mm), 1,05 k mm² (back), 0,59 k mm² (roue), 0 (pneu) → aucun support nécessaire.
+
+## Révision du 09/09/2026 (revue impression + corrections)
+1. **Alésages de palier bouchés** : le fond de l'alésage tombait pile sur le bout du tube → voile
+   d'épaisseur nulle / bouchon plein dans le tube GAUCHE (moyeu impossible à enfoncer). Les alésages
+   dépassent maintenant le bout des tubes de 2 mm (bearR → x_in_R+2,5 ; bearL → −14,0).
+2. **Purge automatique des voiles** : `purger_dechets()` supprime toute composante à épaisseur nulle
+   (connectivité par arêtes) après `nettoyer()` — plus de plaques fantômes (le back passe de 3 composantes
+   à 1, watertight, profondeur réelle 29 au lieu de 34,9 gonflée par un voile flottant).
+3. **Plaques de slicing régénérées** (`chassis/make_plates.py`) depuis les STL courants.
+4. **Avant-trous M3** : présents en vides internes Ø2,6 × 16 mm dans les 4 plots (autotaraudage).
+5. **Non-manifold** : les compteurs bruts des STL (39/102/1927/585) sont des sommets non soudés —
+   après `merge_vertices` les coques sont watertight (back) ou fermées hors ouverture de joint (front).
+
 
 ## Réglages électriques (rappel POWER_GUIDE)
 - Servos sur 5 V séparé (BEC/buck), GND commun ; jamais le 3V3 de la carte.
