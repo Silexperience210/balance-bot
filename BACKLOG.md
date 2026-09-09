@@ -23,14 +23,21 @@ Statuts : ⬜ à faire · 🔄 en cours · ✅ fait · ⏸ bloqué (hardware/att
 - [x] footLDeg/footRDeg dans BotState + « PIED P:+0 deg » à l'écran
 - [x] wheels.cpp/h supprimés
 
-## LOT 2b — Gains PID validés par SIMULATION ✅ (commit 87758d0)
+## LOT 2b — Gains PID ~~validés~~ par SIMULATION ⚠️ INVALIDÉ (revue 09/09)
 - [x] Simulateur 1D rejouable (sim/balancebot_sim.py) : prouve Ki > g/R ≈ 300
       requis — le Ki=20 hérité du design « roues » ne pouvait PAS tenir debout
-- [x] Gains appliqués : Kp 8→25, Ki 20→500, Kd 0.35→0.5 (validés : tient
-      θ0=5°, bruit, tapes modérées ; chute > 0.8 rad/s = limite ±45° course)
+- [x] Gains appliqués : Kp 8→25, Ki 20→500, Kd 0.35→0.5
 - [x] Recentrage adouci pour le 1er test (trim ±1→±0.4°, rate 0.3→0.1°/s)
 - [x] Fragilité du trim d'angle documentée (balancebot penché = accélère)
 - [x] TEST_PROTOCOL.md : protocole complet du premier essai debout
+- [ ] ⚠️ **REVUE 09/09 : la « validation » ne tient pas.** Le simulateur ne
+      modélisait ni la cascade, ni le roulement exact, et son autorité était
+      57× trop forte (cf. commit 19535f7). Modèle corrigé + cascade portée :
+      **0/6 scénarios** pour Kp25/Ki500/Kd0.5, et **aucun** jeu du balayage
+      (Kp 0,5-100 / Ki 350-2000 / Kd 0,2-20) ne tient. À re-régler au banc web
+      sur le robot réel — voir FIRMWARE_REVIEW.md §1bis.
+- [ ] Cascade de recentrage : **signe de la boucle interne était inversé**
+      (poussait le pied vers la butée) — corrigé, gains à régler en réel.
 
 ## ⏭ Prochaines étapes (dépendent du TEST RÉEL)
 - [ ] Lot 3 : alim séparée servos (BEC/power bank 5V + GND commun) — Silex

@@ -34,10 +34,10 @@
 #define PIN_IIC_SDA     18
 
 // ── Servos (GPIO libres) ───────────────────────────────────────────
-// Mécanique v2 : plus de roues. Les GPIO 1 et 2 pilotent maintenant les
-// deux PIEDS EN ARC (foot_arc.stl) sur des SG90 STANDARD 180° — voir
-// feet.cpp et chassis/FIT_NOTES.md §9. Les broches sont inchangées, seuls
-// les noms suivent la mécanique.
+// Mécanique v3.1 : plus de roues. Les GPIO 1 et 2 pilotent les deux
+// PIEDS EN ARC sur des SG90 STANDARD 180° — voir feet.cpp et
+// chassis/NOTES_v3.md. Les broches sont inchangées, seuls les noms
+// suivent la mécanique.
 #define SERVO_FOOT_L    1      // pied gauche — servo de pied (cf. FEET_MODE_CONTINUOUS)
 #define SERVO_FOOT_R    2      // pied droit  — servo de pied (cf. FEET_MODE_CONTINUOUS)
 #define SERVO_HEAD_PAN  3      // tête : rotation horizontale (SG90 standard)
@@ -63,6 +63,11 @@
 
 // ── Constantes robot ───────────────────────────────────────────────
 #define BALANCE_LOOP_HZ 200    // fréquence de la boucle d'équilibre
+// Butée DURE du pied en arc (°) — SOURCE UNIQUE. feet.cpp l'applique
+// (clamp de φ + coupure explicite en mode continu) et balance.cpp s'en
+// sert pour le soft clamp qui s'ouvre AVANT elle. Deux littéraux 45
+// recopiés dans deux fichiers finissent toujours par diverger.
+#define FOOT_HARD_DEG   45.0f
 #define HEAD_PAN_MIN    0      // degrés
 #define HEAD_PAN_MAX    180
 #define HEAD_TILT_MIN   20     // éviter de viser le sol

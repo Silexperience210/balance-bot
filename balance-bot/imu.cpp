@@ -122,15 +122,21 @@ bool begin() {
                                           // gèlerait la boucle 200 Hz si un
                                           // contact faiblit en mouvement
 
-  if      (probe(kAddrPrimary))   s_addr = kAddrPrimary;
-  else if (probe(kAddrSecondary)) s_addr = kAddrSecondary;
-  else return false;                      // pas d'IMU → mode démo UI
-
-  uint8_t who = 0;
-  if (!readRegs(kRegWhoAmI, &who, 1)) return false;
-  // MPU6050 = 0x68 ; les clones MPU6500/9250 répondent 0x70/0x71/0x73
-  // et sont compatibles registre à registre pour ce qu'on utilise ici.
-  if (who != 0x68 && who != 0x70 && who != 0x71 && who != 0x73) return false;
+  // Chaque adresse est essayée COMPLÈTEMENT (présence ET identité) : un
+  // simple ACK sur 0x68 ne suffit pas — un autre esclave à cette adresse
+  // (EEPROM, second capteur) répondrait et on piloterait le mauvais.
+  bool found = false;
+  const uint8_t kAddrs[2] = { kAddrPrimary, kAddrSecondary };
+  for (uint8_t i = 0; i < 2 && !found; i++) {
+    if (!probe(kAddrs[i])) continue;
+    s_addr = kAddrs[i];
+    uint8_t who = 0;
+    if (!readRegs(kRegWhoAmI, &who, 1)) continue;
+    // MPU6050 = 0x68 ; les clones MPU6500/9250 répondent 0x70/0x71/0x73
+    // et sont compatibles registre à registre pour ce qu'on utilise ici.
+    if (who == 0x68 || who == 0x70 || who == 0x71 || who == 0x73) found = true;
+  }
+  if (!found) return false;               // pas d'IMU → mode démo UI
 
   if (!writeReg(kRegPwrMgmt1, 0x80)) return false;  // reset
   delay(100);

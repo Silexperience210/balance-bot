@@ -136,10 +136,19 @@ void handleState() {
   s_server.send(200, "application/json", buf);
 }
 
-// Un argument absent laisse le gain inchangé (NaN → ignoré par setGains).
+// Un argument ABSENT ou NON NUMÉRIQUE laisse le gain inchangé (NaN →
+// ignoré par setGains). toFloat() seul ne suffit pas : il renvoie 0 pour
+// « kp= » ou « kp=abc », et ce 0 silencieux mettrait un gain à zéro en
+// pleine session de réglage (robot qui décroche sans raison apparente).
 float argOrNan(const char* name) {
   if (!s_server.hasArg(name)) return NAN;
-  return s_server.arg(name).toFloat();
+  String v = s_server.arg(name);
+  v.trim();
+  if (v.isEmpty()) return NAN;
+  char* end = nullptr;
+  const float f = strtof(v.c_str(), &end);
+  if (end == v.c_str() || *end != '\0') return NAN;
+  return f;
 }
 
 void handleGains() {

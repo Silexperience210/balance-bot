@@ -41,9 +41,11 @@ namespace {
 //   2. monter Kd pour amortir l'oscillation (trop → tremblement aigu) ;
 //   3. monter Ki juste assez pour effacer la dérive lente / la pente.
 //
-// Gains validés en simulation 1D (sim/, θ̈ = (g/h)·sinθ − (R/h)·φ̈·cosθ,
-// h = 80 mm, R = 32.5 mm, servo 1er ordre τ = 50 ms limité à 250 °/s,
-// contrôleur copié à l'identique depuis ce fichier).
+// Gains de DÉPART, NON validés par une simulation rejouable (voir
+// FIRMWARE_REVIEW.md §1bis) : le simulateur du dépôt modélisait un autre
+// robot (autorité 57× trop forte, roulement incomplet, sans cascade). Avec
+// le modèle corrigé, ce jeu de gains ne tient aucun scénario — le réglage
+// réel au banc web (BalanceBot-Tune) est l'étape obligatoire suivante.
 //
 // Condition de stabilité : la commande agit en VITESSE de pied, donc le
 // terme intégral est ce qui fournit la position de pied compensant la
@@ -101,7 +103,7 @@ constexpr float kOutToFootDegS = 1.0f;
 // La marge (9°) couvre le retard du servo et l'incertitude de calage
 // du palonnier (4 positions à 90° : jusqu'à quelques degrés d'erreur).
 constexpr float kFootMarginDeg = 9.0f;
-constexpr float kFootHardDeg   = 45.0f;   // = butée dure de feet.cpp
+constexpr float kFootHardDeg   = FOOT_HARD_DEG;   // = butée dure de feet.cpp (config.h)
 // Le soft clamp s'ouvre progressivement sur les 10 derniers degrés :
 // une coupure franche exciterait le pendule.
 constexpr float kFootTaperDeg  = 10.0f;
@@ -149,6 +151,10 @@ constexpr float        kRecoverAngleDeg = 10.0f;  // redressé sous cet angle…
 constexpr unsigned long kRecoverHoldMs  = 700;    // …et stable ce temps-là
 constexpr float        kDtMinS = 0.0005f;         // bornes de dt (protection
 constexpr float        kDtMaxS = 0.050f;          //  contre les hoquets)
+// Trames IMU consécutives perdues tolérées avant coupure : à 200 Hz,
+// 20 trames ≈ 100 ms. En deçà, l'angle précédent tient (micro-coupure
+// I2C) ; au-delà, on asservirait sur une mesure figée.
+constexpr uint16_t     kImuFailMax = 20;
 
 // ── Mode démo (équilibre OFF) ──────────────────────────────────────
 // Sert à VALIDER LA MÉCANIQUE sans asservissement : les flèches de l'UI
@@ -189,6 +195,7 @@ Pid   s_pid;
 bool  s_enabled   = false;
 bool  s_imuOk     = false;
 bool  s_fallen    = false;         // verrou de chute (le robot ne se débat pas)
+bool  s_imuLost   = false;         // IMU muet : équilibre coupé jusqu'au retour
 float s_fwdSmooth = 0.0f;          // consignes UI lissées
 float s_turnSmooth= 0.0f;
 float s_lastRateDps = 0.0f;        // dernière vitesse gyro (télémétrie web)
@@ -252,10 +259,17 @@ bool recenterStep(float footAvg, float dtRec) {
 
 // Boucle INTERNE de la cascade (appelée à 200 Hz) : l'écart entre la
 // vitesse de pied voulue et celle réellement commandée devient un angle.
-// Pour faire ROULER le pied vers l'avant, le robot doit pencher vers
-// l'avant : le signe est donc direct.
+// SIGNE — un setpoint POSITIF fait pencher le robot vers l'avant, ce qui
+// commande au PID des pieds une rotation vers l'ARRIÈRE (le point d'appui
+// suit le CoM). Pour RAMENER un pied parti vers l'avant (φ > 0, v_cible
+// négative), il faut donc un setpoint POSITIF : la contribution est de
+// signe opposé à (v_cible − φ̇).
+// L'ancienne formule (+kRecenterKv·(v_cible − φ̇)) donnait un setpoint
+// négatif pour un pied en avant ⇒ commande de pied vers l'AVANT ⇒ le pied
+// filait vers la butée au lieu de revenir (vérifié en simulation : pied
+// lâché à +20° → +37° en 0,3 s, puis panic).
 inline float recenterSetpoint() {
-  return constrain(kRecenterKv * (s_recenterVel - s_footVelFilt),
+  return constrain(-kRecenterKv * (s_recenterVel - s_footVelFilt),
                    -kRecenterRefMax, kRecenterRefMax);
 }
 
@@ -301,6 +315,7 @@ namespace Balance {
 bool begin() {
   s_enabled = false;
   s_fallen  = false;
+  s_imuLost = false;
   s_lastMicros = micros();
   s_recenterLast = millis();
   s_recenterVel = 0.0f;
@@ -368,6 +383,14 @@ void loop() {
     return;
   }
 
+  // Servos de pieds non attachés : φ resterait à 0 alors que les pieds
+  // sont morts — le robot « équilibrerait » dans le vide et tomberait.
+  if (!Feet::ready()) {
+    halt();
+    demoStep();
+    return;
+  }
+
   // ── dt réel (le .ino cadence à ~5 ms, mais ne le suppose pas) ────
   const unsigned long now = micros();
   float dt = (now - s_lastMicros) * 1e-6f;   // le calcul non signé gère le rollover
@@ -375,7 +398,20 @@ void loop() {
   dt = constrain(dt, kDtMinS, kDtMaxS);
 
   // ── Mesure ───────────────────────────────────────────────────────
-  Imu::update(dt);                   // trame perdue : l'angle précédent tient
+  // Une trame perdue (bus I2C secoué) : l'angle précédent tient. Au-delà
+  // de kImuFailMax consécutives, on asservirait sur une mesure FIGÉE — on
+  // coupe et on attend le retour du capteur (s_imuLost se relève seul dès
+  // qu'une trame repasse).
+  static uint16_t s_imuFailStreak = 0;
+  if (Imu::update(dt)) {
+    s_imuFailStreak = 0;
+    s_imuLost = false;
+  } else if (++s_imuFailStreak >= kImuFailMax) {
+    s_imuLost = true;
+    halt();
+    publishFeet();
+    return;
+  }
   const float pitch = Imu::pitchDeg();
   const float rate  = Imu::pitchRateDps();
   g_state.pitchDeg  = pitch;
@@ -507,6 +543,11 @@ void setEnabled(bool on) {
     s_recenterLast = millis();
     s_recenterVel = 0.0f;
     s_footVelFilt = 0.0f;
+    // Une consigne UI restée « tenue » (doigt sur une flèche) pendant que
+    // l'équilibre était coupé ne doit pas repartir d'un coup : le robot
+    // bondirait à l'armement. On repart toujours du neutre.
+    g_state.cmdForward = 0;
+    g_state.cmdTurn    = 0;
   } else {
     halt();
   }

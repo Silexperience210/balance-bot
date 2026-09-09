@@ -58,12 +58,12 @@ constexpr float kTrimDegR = 0.0f;
 // Sens : +1 si un angle de pied POSITIF (= pousse vers l'avant) demande
 // un angle de servo croissant. Les deux servos sont montés en miroir
 // (chassis : le gauche est le droit tourné de 180° autour de Y), d'où
-// l'inversion du gauche — même convention que l'ancien wheels.cpp.
+// l'inversion du gauche.
 constexpr float kDirL = -1.0f;
 constexpr float kDirR = +1.0f;
 
 // ── Bornes de sécurité ─────────────────────────────────────────────
-constexpr float kFootHardDeg = 45.0f;      // butée dure interne (voir en-tête)
+constexpr float kFootHardDeg = FOOT_HARD_DEG;  // butée dure — SOURCE : config.h
 constexpr float kSpeedMaxDegS = 400.0f;    // au-delà, un SG90 ne suit pas
 // Bornes de dt, identiques à balance.cpp : protection contre les hoquets
 // de boucle (un dt aberrant ferait sauter le pied d'un bloc).

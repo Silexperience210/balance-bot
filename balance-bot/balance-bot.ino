@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════
 // BalanceBot — sketch principal (assemblage)
-// T-Display-S3-Touch (ESP32-S3) · 4× SG90 (2 rotatifs roues, 2 pan/tilt)
-// · MPU6050 (I2C) · HC-SR04 · châssis imprimé
+// T-Display-S3-Touch (ESP32-S3) · 2 pieds en arc + 2 pan/tilt (SG90)
+// · MPU6050 (I2C) · HC-SR04 · châssis imprimé ₿
 //
 // Ce fichier est écrit par Hermes (orchestrateur). Les agents coding
 // implémentent UNIQUEMENT les .cpp de leur module contre interfaces.h.
@@ -49,7 +49,7 @@ void loop() {
   // ── Boucle d'équilibre : 200 Hz ─────────────────────────────────
   // Toujours active même à l'arrêt : Balance::loop() mesure l'IMU en
   // continu (le PITCH affiché vit même sans équilibre) et ne pilote les
-  // roues que si l'équilibre est activé.
+  // pieds que si l'équilibre est activé.
   static unsigned long tBalance = 0;
   if (nowMs - tBalance >= (1000UL / BALANCE_LOOP_HZ)) {
     tBalance = nowMs;

@@ -211,15 +211,19 @@ bool Ui::begin() {
   if (!g_touch->init()) {
     delete g_touch;
     g_touch = nullptr;
-    g_tft.setTextColor(C_RED, C_BG);
-    g_tft.setTextSize(2);
-    g_tft.drawString("TOUCH ABSENT", 88, 80);
-    return false;
+  } else {
+    g_touch->setRotation(1);  // aligne le repère touch sur le paysage
   }
-  g_touch->setRotation(1);  // aligne le repère touch sur le paysage
 
+  // Le tactile peut manquer (nappe débranchée) : l'écran reste utile en
+  // télémétrie, et les flèches de consigne deviennent simplement inertes
+  // (Ui::loop() remet les consignes à zéro tant que g_touch est nul). On
+  // ne condamne donc PAS tout l'affichage à cause du touch.
   g_initialized = true;
   drawStatic();
+  if (!g_touch) updateLabel(160, 8, 70, "TOUCH KO", C_RED);
+  Serial.println(g_touch ? "UI TOUCH  : OK"
+                         : "UI TOUCH  : ABSENT — télémétrie seule, boutons inertes");
   return true;
 }
 

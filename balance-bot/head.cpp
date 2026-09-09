@@ -127,9 +127,12 @@ bool Head::measureUltrasonic() {
   delayMicroseconds(10);
   digitalWrite(PIN_US_TRIG, LOW);
 
-  // Mesure ECHO : timeout 12000 µs ≈ 2 m (suffisant pour l'évitement d'un
-  // petit robot ; un timeout long bloquerait la boucle d'équilibre).
-  unsigned long duration = pulseIn(PIN_US_ECHO, HIGH, 12000);
+  // Mesure ECHO : timeout aligné sur la portée UTILE (US_MAX_CM = 150 cm
+  // → 150 × 58 = 8,7 ms) + marge. pulseIn() est BLOQUANT : ces
+  // millisecondes sont prises sur la boucle d'équilibre (5 ms par cycle),
+  // donc on ne bloque pas 12 ms pour une distance qu'on jetterait ensuite.
+  static constexpr unsigned long kEchoTimeoutUs = (unsigned long)US_MAX_CM * 58UL + 800UL;
+  unsigned long duration = pulseIn(PIN_US_ECHO, HIGH, kEchoTimeoutUs);
 
   float distanceCm = -1.0f;
   if (duration > 0) {
@@ -205,6 +208,10 @@ void Head::handleHeadMovement() {
   g_state.headPanDeg  = (int)lroundf(panPos);
   g_state.headTiltDeg = (int)lroundf(tiltPos);
 
-  servoPan.write(g_state.headPanDeg);
-  servoTilt.write(g_state.headTiltDeg);
+  // N'écrire que si la valeur CHANGE : réécrire la même position 50×/s
+  // fait vibrer/ronronner un SG90 pour rien. En mode équilibre la tête est
+  // immobile → plus aucune écriture PWM.
+  static int lastPan = -1, lastTilt = -1;
+  if (g_state.headPanDeg != lastPan)   { lastPan  = g_state.headPanDeg;  servoPan.write(lastPan); }
+  if (g_state.headTiltDeg != lastTilt) { lastTilt = g_state.headTiltDeg; servoTilt.write(lastTilt); }
 }
