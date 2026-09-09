@@ -39,7 +39,58 @@ constexpr unsigned long kSlowRequestUs = 5000;
 WebServer      s_server(80);
 bool           s_up          = false;   // AP + serveur démarrés
 unsigned long  s_lastReqMs   = 0;
-bool           s_stationSeen = false;   // ≥1 station associée (cache 20 Hz)
+bool           s_stationSeen = false;   // ≥1 station associée (cache 10 Hz)
+unsigned long  s_lastStationMs = 0;
+TaskHandle_t   s_task        = nullptr;
+
+// ── Démarrage / arrêt de la radio (partagés par begin() et toggle()) ──
+bool startRadio() {
+  WiFi.mode(WIFI_AP);
+  // Réseau ouvert (cf. bandeau en tête de fichier), canal 1, 4 clients max.
+  if (!WiFi.softAP(kSsid, nullptr, 1, 0, 4)) {
+    WiFi.mode(WIFI_OFF);
+    return false;
+  }
+  s_server.begin();
+  s_up = true;
+  Serial.print("BANC WEB  : OUVERT — SSID « ");
+  Serial.print(kSsid);
+  Serial.print(" » → http://");
+  Serial.println(WiFi.softAPIP());
+  return true;
+}
+
+void stopRadio() {
+  WiFi.softAPdisconnect(true);
+  WiFi.mode(WIFI_OFF);                   // aucune radio qui traîne
+  s_up = false;
+  s_stationSeen = false;
+  Serial.println("BANC WEB  : FERMÉ (radio coupée)");
+}
+
+// ── Tâche serveur (cœur 0, celui du WiFi) ───────────────────────────
+// Le serveur HTTP tournait dans loop(), sur le même fil que la boucle
+// d'équilibre : un client TCP lent (constantes HTTP_MAX_*_WAIT de la lib,
+// jusqu'à 5 s) pouvait geler l'asservissement. Ici il ne peut plus voler
+// de temps à la boucle — au pire il retarde sa propre télémétrie.
+void serverTask(void*) {
+  for (;;) {
+    if (s_up) {
+      const unsigned long now = millis();
+      if (now - s_lastStationMs > 100) {
+        s_lastStationMs = now;
+        s_stationSeen = (WiFi.softAPgetStationNum() > 0);
+      }
+      const unsigned long t0 = micros();
+      s_server.handleClient();
+      const unsigned long dt = micros() - t0;
+      if (dt > kSlowRequestUs) {
+        Serial.printf("TUNER : requête lente %lu us\n", dt);
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(5));        // 200 Hz max, largement assez
+  }
+}
 
 // ── Page embarquée ─────────────────────────────────────────────────
 // Mobile-first, sombre, zéro dépendance externe (aucun CDN : l'AP n'a
@@ -163,11 +214,13 @@ void handleGains() {
   s_server.send(200, "text/plain", "ok");
 }
 
-// Même chemin que le bouton EQUIL. de l'écran : Balance::setEnabled().
+// Même chemin que le bouton EQUIL. de l'écran : on écrit le DRAPEAU, la
+// boucle d'équilibre applique (elle seule touche aux servos — jamais une
+// écriture PWM depuis la tâche web).
 void handleBal() {
   touchReq();
   const bool on = s_server.hasArg("on") && s_server.arg("on").toInt() != 0;
-  Balance::setEnabled(on);
+  g_state.cmdEnabled = on;
   Serial.printf("TUNER : équilibre %s\n", on ? "ON" : "OFF");
   s_server.send(200, "text/plain", "ok");
 }
@@ -177,47 +230,39 @@ void handleBal() {
 namespace Tuner {
 
 bool begin() {
-  WiFi.mode(WIFI_AP);
-  // Réseau ouvert (cf. bandeau en tête de fichier), canal 1, 4 clients max.
-  if (!WiFi.softAP(kSsid, nullptr, 1, 0, 4)) {
-    Serial.println("BANC WEB  : ÉCHEC softAP — tuner désactivé");
-    WiFi.mode(WIFI_OFF);                 // pas de radio qui traîne pour rien
-    return false;
-  }
+  // Routes enregistrées une seule fois, indépendamment de la radio.
   s_server.on("/",           HTTP_GET,  handleRoot);
   s_server.on("/api/state",  HTTP_GET,  handleState);
   s_server.on("/api/gains",  HTTP_POST, handleGains);
   s_server.on("/api/bal",    HTTP_POST, handleBal);
   s_server.onNotFound([]() { s_server.send(404, "text/plain", "404"); });
-  s_server.begin();
-  s_up = true;
-  Serial.print("BANC WEB  : OK — SSID « " );
-  Serial.print(kSsid);
-  Serial.print(" » (ouvert) → http://");
-  Serial.println(WiFi.softAPIP());
+
+  // Le serveur tourne sur SA tâche (cœur 0, celui du WiFi). Créée une fois
+  // pour toutes ; elle ne fait rien tant que la radio est fermée.
+  xTaskCreatePinnedToCore(serverTask, "tuner", 8192, nullptr, 1, &s_task, 0);
+
+  if (!startRadio()) {
+    Serial.println("BANC WEB  : ÉCHEC softAP — tuner désactivé (appui long BOOT pour réessayer)");
+    return false;
+  }
   return true;
 }
 
-void loop() {
-  if (!s_up) return;                     // no-op total si l'AP n'a pas démarré
+// Conservé pour le contrat interfaces.h : le serveur vit maintenant sur sa
+// propre tâche (serverTask) — loop() n'a plus rien à faire, et le .ino n'a
+// donc plus à l'appeler. La cadence réelle est fixée par la tâche.
+void loop() {}
 
-  // Cadence : 20 Hz max. Le .ino gère en plus l'exclusion avec la boucle
-  // d'équilibre ; ce garde-fou reste local pour que loop() soit sûr à
-  // appeler aussi souvent qu'on veut.
-  static unsigned long tLast = 0;
-  const unsigned long now = millis();
-  if (now - tLast < 50) return;
-  tLast = now;
-
-  s_stationSeen = (WiFi.softAPgetStationNum() > 0);
-
-  const unsigned long t0 = micros();
-  s_server.handleClient();
-  const unsigned long dt = micros() - t0;
-  if (dt > kSlowRequestUs) {
-    Serial.printf("TUNER : requête lente %lu us\n", dt);
-  }
+// Appui long sur BOOT (.ino) : ouvre/ferme le banc web à la demande.
+// Le réseau est OUVERT : le fermer quand on ne règle pas supprime la
+// surface d'attaque et la consommation radio.
+bool toggle() {
+  if (s_up) stopRadio();
+  else      startRadio();
+  return s_up;
 }
+
+bool isUp() { return s_up; }
 
 // « Un client est là » : une station associée ET un échange récent. Les
 // deux, sinon un téléphone qui reste connecté écran éteint garderait le

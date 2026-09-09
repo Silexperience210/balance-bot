@@ -24,6 +24,9 @@ void setup() {
   pinMode(PIN_POWER_ON, OUTPUT);
   digitalWrite(PIN_POWER_ON, HIGH);
 
+  // Bouton BOOT : appui long = ouvre/ferme le banc de réglage web.
+  pinMode(PIN_BUTTON_1, INPUT_PULLUP);
+
   Battery::begin();
 
   if (Ui::begin())      Serial.println("UI        : OK");
@@ -81,14 +84,22 @@ void loop() {
     if (dt > g_state.dbgHeadMs) g_state.dbgHeadMs = (uint8_t)min(dt, 255UL);
   }
 
-  // ── Banc de réglage web : au plus 20 Hz (cadencé dans Tuner::loop) ──
-  // Priorité absolue à l'équilibre : quand le robot tient debout, on ne
-  // sert le web que si le dernier échange date de plus de 100 ms — assez
-  // pour laisser passer la télémétrie (le navigateur interroge toutes
-  // les 150 ms) sans jamais enchaîner deux requêtes en pleine correction.
-  if (!g_state.balancing || nowMs - Tuner::lastRequestMs() > 100) {
-    Tuner::loop();
+  // ── Banc de réglage web ─────────────────────────────────────────
+  // Le serveur HTTP vit sur sa propre tâche (cœur 0) : plus rien à
+  // cadencer ici, la boucle d'équilibre ne peut plus être gelée par un
+  // client TCP lent. Appui long (~1,5 s) sur BOOT = ouvrir/fermer l'AP.
+  static unsigned long bootDownMs = 0;
+  static bool bootDone = false;
+  static bool bootPrev = false;
+  const bool bootNow = (digitalRead(PIN_BUTTON_1) == LOW);
+  if (bootNow && !bootPrev) {
+    bootDownMs = nowMs;
+    bootDone = false;
+  } else if (bootNow && !bootDone && (nowMs - bootDownMs >= 1500)) {
+    bootDone = true;
+    Serial.printf("BANC WEB  : %s\n", Tuner::toggle() ? "OUVERT" : "FERMÉ");
   }
+  bootPrev = bootNow;
 
   // Batterie : lecture 1×/seconde (état global pour l'UI)
   static unsigned long tBat = 0;

@@ -23,6 +23,7 @@
 // Cadencé à BALANCE_LOOP_HZ (200 Hz) par le .ino ; aucun delay() ici.
 // ═══════════════════════════════════════════════════════════════════
 #include <Arduino.h>
+#include <Preferences.h>
 
 #include "config.h"
 #include "interfaces.h"
@@ -156,6 +157,13 @@ constexpr float        kDtMaxS = 0.050f;          //  contre les hoquets)
 // I2C) ; au-delà, on asservirait sur une mesure figée.
 constexpr uint16_t     kImuFailMax = 20;
 
+// ── Surveillance de cadence ─────────────────────────────────────────
+// Sous ce seuil, la boucle ne pilote plus correctement les pieds (l'UI,
+// le TFT ou le web lui ont volé du temps) : on coupe plutôt que de laisser
+// un asservissement faux. La grâce couvre le démarrage (WiFi/TFT).
+constexpr float         kMinLoopHz   = 120.0f;
+constexpr unsigned long kRateGraceMs = 3000;
+
 // ── Mode démo (équilibre OFF) ──────────────────────────────────────
 // Sert à VALIDER LA MÉCANIQUE sans asservissement : les flèches de l'UI
 // font rouler les pieds lentement dans une plage volontairement étroite
@@ -201,6 +209,16 @@ float s_turnSmooth= 0.0f;
 float s_lastRateDps = 0.0f;        // dernière vitesse gyro (télémétrie web)
 unsigned long s_lastMicros   = 0;
 unsigned long s_uprightSince = 0;  // début de la fenêtre de redressement
+bool          s_rateLow      = false;  // boucle trop lente → arrêt de sécurité
+
+// ── Gains persistants (NVS) ────────────────────────────────────────
+// Sans ça, chaque reset repart sur les valeurs de compilation et tout le
+// réglage fait au banc web est perdu (le flash n'est pas infini : on
+// throttle les écritures).
+Preferences   s_prefs;
+bool          s_prefsOk     = false;
+unsigned long s_lastSaveMs  = 0;
+constexpr unsigned long kSaveThrottleMs = 1500;
 
 float         s_recenterVel  = 0.0f;  // v_cible lissée de la boucle externe (°/s)
 float         s_footVelFilt  = 0.0f;  // vitesse de pied commandée, filtrée (°/s)
@@ -211,6 +229,19 @@ inline float slew(float current, float target, float maxStep) {
   if (delta >  maxStep) return current + maxStep;
   if (delta < -maxStep) return current - maxStep;
   return target;
+}
+
+// Écrit les gains en NVS (throttlé : un glissement de slider = 1 écriture).
+void saveGains() {
+  if (!s_prefsOk) return;
+  const unsigned long now = millis();
+  if (now - s_lastSaveMs < kSaveThrottleMs) return;
+  s_lastSaveMs = now;
+  s_prefs.putFloat("kp",    kKp);
+  s_prefs.putFloat("ki",    kKi);
+  s_prefs.putFloat("kd",    kKd);
+  s_prefs.putFloat("kpPhi", kRecenterKpPhi);
+  s_prefs.putFloat("kv",    kRecenterKv);
 }
 
 // Coupe tout : pieds freinés SUR PLACE (surtout pas de retour au neutre,
@@ -321,6 +352,20 @@ bool begin() {
   s_recenterVel = 0.0f;
   s_footVelFilt = 0.0f;
 
+  // Gains persistants : recharge le réglage fait au banc web avant de
+  // toucher aux pieds. Re-bornés (une NVS abîmée ne doit pas armer des
+  // gains absurdes).
+  s_prefsOk = s_prefs.begin("balancebot", false);
+  if (s_prefsOk) {
+    kKp = constrain(s_prefs.getFloat("kp", kKp), 0.0f, kKpMax);
+    kKi = constrain(s_prefs.getFloat("ki", kKi), 0.0f, kKiMax);
+    kKd = constrain(s_prefs.getFloat("kd", kKd), 0.0f, kKdMax);
+    kRecenterKpPhi = constrain(s_prefs.getFloat("kpPhi", kRecenterKpPhi), 0.0f, kRecenterKpPhiMax);
+    kRecenterKv    = constrain(s_prefs.getFloat("kv",    kRecenterKv),    0.0f, kRecenterKvMax);
+    Serial.printf("GAINS NVS : Kp=%.1f Ki=%.0f Kd=%.2f | Kpφ=%.1f Kv=%.1f\n",
+                  kKp, kKi, kKd, kRecenterKpPhi, kRecenterKv);
+  }
+
   // Les pieds d'abord : même sans IMU on veut les poser au repos (robot
   // droit), et l'UI reste utilisable en mode démo.
   Feet::begin();
@@ -357,21 +402,40 @@ void loop() {
       g_state.balanceHz = s_count * 1000.0f / (float)span;
       s_count = 0;
       s_winMs = nowMs;
+      // Surveillance : passé la grâce de démarrage, une cadence sous le
+      // seuil met l'asservissement en sécurité (il revient tout seul).
+      if (nowMs > kRateGraceMs) s_rateLow = (g_state.balanceHz < kMinLoopHz);
     }
   }
 
-  const bool want = isEnabled();
-  if (!s_enabled && want) {          // front montant : on repart propre
+  // Cadence insuffisante : on ne pilote plus (voir kMinLoopHz).
+  if (s_rateLow) {
+    halt();
+    publishFeet();
+    return;
+  }
+
+  bool want = isEnabled();
+  // Refus d'armer sur batterie faible : sous BAT_LOW_V la cellule est à
+  // ~10 % et l'appel de courant des servos fait s'effondrer la tension
+  // (brownout → reboot en pleine correction). On annule la demande.
+  if (want && g_state.batteryLow) {
+    g_state.cmdEnabled = false;
+    want = false;
+  }
+  if (want && !s_enabled) {          // front montant : on repart propre
     s_pid.reset();
     s_lastMicros = micros();
     s_uprightSince = 0;
-    // Armement par g_state.cmdEnabled (l'UI n'appelle pas forcément
+    // Armement par g_state.cmdEnabled (l'UI et le banc web n'appellent pas
     // setEnabled) : sans ça, s_recenterLast daterait de la dernière
     // désactivation et le premier pas de la boucle externe verrait un dt
     // de plusieurs secondes — soit toute la rampe franchie d'un bloc.
     s_recenterLast = millis();
     s_recenterVel = 0.0f;
     s_footVelFilt = 0.0f;
+  } else if (!want && s_enabled) {   // front descendant : arrêt propre
+    halt();
   }
   s_enabled = want;
 
@@ -532,31 +596,19 @@ void loop() {
   g_state.balancing = true;
 }
 
+// Passe par le DRAPEAU partagé : la boucle d'équilibre reste la SEULE à
+// écrire sur les servos (un appelant venu du banc web, sur une autre
+// tâche, ne doit pas toucher aux canaux PWM pendant qu'elle pilote). Le
+// reset du PID et la purge des consignes UI se font sur front MONTANT
+// dans loop(), l'arrêt sur front DESCENDANT.
 void setEnabled(bool on) {
-  s_enabled = on;
-  g_state.cmdEnabled = on;           // miroir pour l'UI (module B)
-  if (on) {
-    s_pid.reset();
-    s_fallen = false;
-    s_uprightSince = 0;
-    s_lastMicros = micros();
-    s_recenterLast = millis();
-    s_recenterVel = 0.0f;
-    s_footVelFilt = 0.0f;
-    // Une consigne UI restée « tenue » (doigt sur une flèche) pendant que
-    // l'équilibre était coupé ne doit pas repartir d'un coup : le robot
-    // bondirait à l'armement. On repart toujours du neutre.
-    g_state.cmdForward = 0;
-    g_state.cmdTurn    = 0;
-  } else {
-    halt();
-  }
+  g_state.cmdEnabled = on;
 }
 
-// L'UI peut activer le mode auto en écrivant g_state.cmdEnabled sans
-// passer par setEnabled() : les deux sources sont acceptées, sinon le
-// .ino n'appellerait jamais loop().
-bool isEnabled() { return s_enabled || g_state.cmdEnabled; }
+// État ARMÉ = la DEMANDE (contrat interfaces.h), pas l'état appliqué :
+// l'UI et le banc web voient leur clic immédiatement, l'application se
+// fait au cycle suivant (≤ 5 ms).
+bool isEnabled() { return g_state.cmdEnabled; }
 
 // Verrou de chute : vrai tant que le robot n'a pas été redressé et tenu
 // vertical kRecoverHoldMs. L'UI s'en sert pour afficher « CHUTE » (et
@@ -573,6 +625,7 @@ void setGains(float kp, float ki, float kd) {
   if (!isnan(kp)) kKp = constrain(kp, 0.0f, kKpMax);
   if (!isnan(ki)) kKi = constrain(ki, 0.0f, kKiMax);
   if (!isnan(kd)) kKd = constrain(kd, 0.0f, kKdMax);
+  saveGains();
 }
 
 void getGains(float& kp, float& ki, float& kd) {
@@ -583,6 +636,7 @@ void getGains(float& kp, float& ki, float& kd) {
 void setRecenterGains(float kpPhi, float kv) {
   if (!isnan(kpPhi)) kRecenterKpPhi = constrain(kpPhi, 0.0f, kRecenterKpPhiMax);
   if (!isnan(kv))    kRecenterKv    = constrain(kv,    0.0f, kRecenterKvMax);
+  saveGains();
 }
 
 void getRecenterGains(float& kpPhi, float& kv) {

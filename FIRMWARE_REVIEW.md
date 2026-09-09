@@ -82,7 +82,40 @@ valeurs « validées » de la docstring d'origine (supprimées).
 - **Réglage à chaud** : float 32 bits alignés, lectures/écritures atomiques sur Xtensa — le
   commentaire de `balance.cpp` est exact (pas de `volatile` nécessaire).
 
-## 3. Limites connues, NON corrigées (volontaire)
+## 4bis. Améliorations IMPLÉMENTÉES (09/09, même session) + vérification à chaud
+
+| # | Amélioration | Détail |
+|---|---|---|
+| A1 | **Banc web sur sa propre tâche (cœur 0)** | `xTaskCreatePinnedToCore(serverTask, …, 0)` : un client TCP lent ne peut plus geler la boucle d'équilibre (la lib WebServer peut bloquer jusqu'à ~5 s sur les constantes `HTTP_MAX_*_WAIT`). `Tuner::loop()` devient un no-op (contrat conservé). |
+| A2 | **Écritures servos centralisées** | L'UI et le banc web ne touchent plus aux PWM : ils écrivent `g_state.cmdEnabled` / les consignes, et la boucle d'équilibre applique (front montant = reset PID + purge des consignes, front descendant = `halt()`). `setEnabled()` est devenu un simple drapeau ; `isEnabled()` renvoie la DEMANDE (contrat interfaces.h). |
+| A3 | **Watchdog de cadence** | `balanceHz < 120` passé la grâce de 3 s → `halt()` automatique, reprise dès que la cadence remonte. |
+| A4 | **Refus d'armer sur batterie faible** | `batteryLow` (lecture valide < 3,5 V) → la demande d'armement est annulée ; l'écran affiche « BAT. FAIBLE » en rouge. USB seul (`batteryV = -1`) reste armable. |
+| A5 | **Gains persistants en NVS** | `Preferences` : chargés au boot (re-bornés), écrits à chaque réglage (throttle 1,5 s pour ne pas user le flash). Un reset ne perd plus le réglage du banc web. |
+| A6 | **AP à la demande** | Appui long (~1,5 s) sur BOOT (GPIO0) : ouvre/ferme la radio du banc web (`Tuner::toggle()`). L'AP démarre toujours allumé au boot (workflow inchangé), mais peut maintenant être coupé. |
+
+**Vérification à chaud (réelle, 09/09 22h)** — firmware flashé sur la carte (`hash verified`),
+AP « BalanceBot-Tune » diffusé, puis test HTTP depuis l'hôte :
+
+```
+GET  /api/state → {"pitch":-17.1,"hz":198,"kp":25.0,"ki":500,"kd":0.50,"kpphi":0.8,"kv":3.0,...}
+GET  /          → 3748 octets
+POST /api/gains → ok   (valeurs identiques : route + écriture NVS exercées, state inchangé)
+```
+
+**198 Hz tenus PENDANT le polling web** : c'est exactement le gain attendu de A1 (avant, le
+web partageait le fil de la boucle d'équilibre). WiFi de l'hôte restauré dans le même script.
+
+**Reste à faire (volontairement non fait ici)** :
+
+- **Boucle d'équilibre sur tâche prioritaire** (idée n°2 des suggestions) : le MPU6050 et le
+  touch CST816 partagent le MÊME bus I2C. Deux tâches qui parlent à Wire sans mutex se
+  corrompent — il faut d'abord un verrou de bus (`I2C` mutex) et l'unification des écritures
+  servos (faite, cf. A2). À faire APRÈS le premier test réel, pas avant.
+- **LQR + Kalman** (Lot 7) : refonte de la loi de commande, à faire une fois les gains PID
+  réglés en réel et le modèle sim confirmé. Le critère analytique `kp·ki > g/R` (302) montre
+  déjà que la marge est faible : l'ordre logique est réel → modèle → LQR.
+
+## 5. Limites connues, NON corrigées (volontaire)
 
 1. **`pulseIn()` reste bloquant** (≤ 9 ms). Correction propre = driver HC-SR04 non bloquant
    (interruption sur ECHO + `micros()`), ou mesure déportée sur le second cœur. Chantier

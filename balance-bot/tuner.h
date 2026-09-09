@@ -11,10 +11,13 @@
 
 namespace Tuner {
 
-// millis() de la dernière requête HTTP servie (0 si aucune). Le .ino
-// s'en sert pour ne pas déranger la boucle d'équilibre en pleine
-// correction : on ne sert le web que si l'équilibre est OFF, ou si le
-// dernier échange date de plus de 100 ms.
+// millis() de la dernière requête HTTP servie (0 si aucune). Conservé pour
+// la télémétrie / l'UI ; le serveur ne dépend plus de son appelant.
 unsigned long lastRequestMs();
+
+// Ouvre/ferme la radio du banc web (appui long BOOT). Renvoie le nouvel
+// état : true = AP ouvert. isUp() le lit sans rien changer.
+bool toggle();
+bool isUp();
 
 } // namespace Tuner

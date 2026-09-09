@@ -273,11 +273,11 @@ void Ui::loop() {
       else if (i == 2) { g_state.cmdForward = 0; g_state.cmdTurn = -100; }
       else if (i == 3) { g_state.cmdForward = 0; g_state.cmdTurn = 100; }
       else if (i == 4) {
-        // Bascule sur l'état ARMÉ réel. setEnabled(false) coupe tout
-        // (halt + roues au neutre) et le verrou tient : Balance::loop()
-        // sort immédiatement tant que l'utilisateur n'a pas ré-armé.
-        const bool armed = Balance::isEnabled();
-        Balance::setEnabled(!armed);
+        // Bascule le DRAPEAU d'armement : la boucle d'équilibre applique
+        // (arrêt propre sur front descendant) et reste la SEULE à écrire
+        // sur les servos. isEnabled() renvoie la demande → le bouton se
+        // redessine immédiatement.
+        g_state.cmdEnabled = !Balance::isEnabled();
         g_state.cmdForward = 0;
         g_state.cmdTurn = 0;
       }
@@ -369,6 +369,7 @@ void Ui::loop() {
   // Balance), pas un obstacle : l'obstacle a son propre état « OBST. ».
   int state = 0;
   if (Balance::isEnabled() && Balance::isFallen()) state = 2;
+  else if (g_state.batteryLow)   state = 5;   // armement refusé (cf. balance.cpp)
   else if (g_state.obstacleWarn) state = 4;
   else if (g_state.balancing)    state = 1;
   else if (Balance::isEnabled()) state = 3;
@@ -377,10 +378,11 @@ void Ui::loop() {
     const char* s = "IDLE";
     uint16_t col = C_DARK;
     switch (state) {
-      case 1: s = "BALANCING"; col = C_GREEN;  break;
-      case 2: s = "CHUTE";     col = C_RED;    break;
-      case 3: s = "ARME";      col = C_ORANGE; break;
-      case 4: s = "OBST.";     col = C_ORANGE; break;
+      case 1: s = "BALANCING";   col = C_GREEN;  break;
+      case 2: s = "CHUTE";       col = C_RED;    break;
+      case 3: s = "ARME";        col = C_ORANGE; break;
+      case 4: s = "OBST.";       col = C_ORANGE; break;
+      case 5: s = "BAT. FAIBLE"; col = C_RED;    break;
     }
     updateLabel(240, 8, 74, s, col);
   }
