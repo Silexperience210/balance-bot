@@ -234,6 +234,9 @@ void fillPoly(const int16_t* xs, const int16_t* ys, int n, uint16_t color) {
         const int16_t tmp = xi[b - 1]; xi[b - 1] = xi[b]; xi[b] = tmp;
       }
     }
+    // Un nombre impair d'intersections = forme concave mal fermée : on
+    // saute la ligne plutôt que de dessiner des spans décalés.
+    if (cnt & 1) continue;
     for (int a = 0; a + 1 < cnt; a += 2) {
       g_tft.drawFastHLine(xi[a], y, xi[a + 1] - xi[a] + 1, color);
     }
