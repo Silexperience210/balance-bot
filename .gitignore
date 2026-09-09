@@ -1,0 +1,7 @@
+# Artefacts générés (paquets de revue, exports temporaires)
+export/*.zip
+export/**/*.zip
+
+# Sorties Blender
+*.blend1
+chassis/v3/preview_*.png
