@@ -21,6 +21,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 #include "tuner.h"
+#include "ui.h"          // aperçu du visage (/api/face)
 #include <WiFi.h>
 #include <WebServer.h>
 
@@ -179,11 +180,12 @@ void handleState() {
            "{\"pitch\":%.1f,\"rate\":%.0f,\"footL\":%d,\"footR\":%d,"
            "\"hz\":%.0f,\"kp\":%.1f,\"ki\":%.0f,\"kd\":%.2f,"
            "\"kpphi\":%.1f,\"kv\":%.1f,"
-           "\"balancing\":%d,\"up\":%d}",
+           "\"balancing\":%d,\"up\":%d,\"ui\":%u,\"s\":%lu}",
            g_state.pitchDeg, Balance::pitchRateDps(),
            g_state.footLDeg, g_state.footRDeg, g_state.balanceHz,
            kp, ki, kd, kpPhi, kv,
-           Balance::isEnabled() ? 1 : 0, g_state.balancing ? 1 : 0);
+           Balance::isEnabled() ? 1 : 0, g_state.balancing ? 1 : 0,
+           (unsigned)g_state.dbgUiMs, millis() / 1000UL);
   s_server.send(200, "application/json", buf);
 }
 
@@ -200,6 +202,24 @@ float argOrNan(const char* name) {
   const float f = strtof(v.c_str(), &end);
   if (end == v.c_str() || *end != '\0') return NAN;
   return f;
+}
+
+// Diagnostic du repère tactile — TOUCH_REVIEW.md §4. Endpoint séparé (et
+// non un ajout à /api/state) : le tampon de handleState fait 256 o pour
+// ~160 o déjà consommés, une troncature silencieuse produirait un JSON
+// invalide et la page afficherait « hors ligne… ».
+// La valeur est RÉMANENTE : taper un coin, puis charger cette page.
+void handleTouch() {
+  touchReq();
+  const Ui::TouchDebug t = Ui::touchDebug();
+  char buf[192];
+  snprintf(buf, sizeof(buf),
+           "{\"down\":%d,\"brut\":{\"x\":%d,\"y\":%d},"
+           "\"ecran\":{\"x\":%d,\"y\":%d},\"n\":%lu,"
+           "\"mirrorX\":%d,\"mirrorY\":%d}",
+           t.down ? 1 : 0, t.rawX, t.rawY, t.x, t.y,
+           (unsigned long)t.seq, t.mirrorX ? 1 : 0, t.mirrorY ? 1 : 0);
+  s_server.send(200, "application/json", buf);
 }
 
 void handleGains() {
@@ -225,6 +245,21 @@ void handleBal() {
   s_server.send(200, "text/plain", "ok");
 }
 
+// Aperçu du visage sans armer : /api/face?state=3&t=5
+// state : 0 calme · 1 penché · 2 méfiant · 3 énervé · 4 surprise ·
+//         5 content · 6 clin d'œil · 7 chute    (t = secondes, défaut 5)
+void handleFace() {
+  touchReq();
+  const int st = s_server.hasArg("state") ? s_server.arg("state").toInt() : 0;
+  const unsigned long ms = s_server.hasArg("t")
+                               ? (unsigned long)s_server.arg("t").toInt() * 1000UL
+                               : 5000UL;
+  Ui::previewFace((uint8_t)st, ms, s_server.hasArg("sweep"));
+  Serial.printf("TUNER : aperçu visage état %d pendant %lu ms%s\n", st, ms,
+                s_server.hasArg("sweep") ? " (sweep)" : "");
+  s_server.send(200, "text/plain", "ok");
+}
+
 } // namespace
 
 namespace Tuner {
@@ -233,8 +268,10 @@ bool begin() {
   // Routes enregistrées une seule fois, indépendamment de la radio.
   s_server.on("/",           HTTP_GET,  handleRoot);
   s_server.on("/api/state",  HTTP_GET,  handleState);
+  s_server.on("/api/touch",  HTTP_GET,  handleTouch);
   s_server.on("/api/gains",  HTTP_POST, handleGains);
   s_server.on("/api/bal",    HTTP_POST, handleBal);
+  s_server.on("/api/face",   HTTP_GET,  handleFace);
   s_server.onNotFound([]() { s_server.send(404, "text/plain", "404"); });
 
   // Le serveur tourne sur SA tâche (cœur 0, celui du WiFi). Créée une fois
