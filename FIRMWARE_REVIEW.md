@@ -1,5 +1,15 @@
 # Review firmware BalanceBot — 09/09/2026
 
+> **MISE À JOUR 09/09 (nuit) — voir `STALL_ANALYSIS.md`.** Trois chantiers ont été
+> menés après cette review : (1) **cadence** — cause racine trouvée et corrigée
+> (auto-sleep du CST816 qui bloquait le bus I²C ~1 s : 21 chutes/60 s → 0) ;
+> (2) **tactile** — miroir X (l'axe long du CST816 est inversé vs l'écran : sans
+> lui, appuyer sur AVANT/GAUCHE armait le robot), rejet des trames poubelles,
+> verrou d'appui au changement de mode ; (3) **visage AUTO** — 3 bloquants + 4
+> importants de `FACE_REVIEW.md` corrigés. Banc final : `hz` min 199 (contrôle),
+> 196 (visage), pire passage écran 7 ms, verdict OK. `interfaces.h` a gagné des
+> champs de diagnostic de cadence (documentés dans `STALL_ANALYSIS.md §2`).
+
 Périmètre : les 14 fichiers du sketch (`balance-bot/`, ~2 300 lignes) — `balance.cpp`,
 `feet.cpp`, `imu.cpp`, `head.cpp`, `ui.cpp`, `tuner.cpp`, `battery.cpp`, le `.ino`,
 `config.h`, `interfaces.h` et les en-têtes privés. Méthode : lecture intégrale, comparaison
