@@ -163,6 +163,41 @@ def purger_dechets(ob, min_dim=0.05):
     bm.to_mesh(ob.data); bm.free()
     return ob
 
+def boucher_micropores(ob, perim_max=30.0):
+    """Bouche les boucles de bord LIBRES de petit périmètre (trous sous-millimétriques laissés par les
+    booléens). Ne touche jamais aux ouvertures de conception : l'ouverture de joint et les passages
+    (écran, yeux, USB, interrupteur) ont des périmètres de plusieurs centaines de mm."""
+    bm = bmesh.new(); bm.from_mesh(ob.data)
+    bnd = [e for e in bm.edges if len(e.link_faces) == 1]
+    if not bnd:
+        bm.free(); return ob
+    adj = {}
+    for e in bnd:
+        for v in e.verts:
+            adj.setdefault(v, []).append(e)
+    vus, boucles = set(), []
+    for e in bnd:
+        if e in vus:
+            continue
+        pile, comp = [e], []
+        vus.add(e)
+        while pile:
+            x = pile.pop(); comp.append(x)
+            for v in x.verts:
+                for y in adj.get(v, []):
+                    if y not in vus:
+                        vus.add(y); pile.append(y)
+        boucles.append(comp)
+    petites = [c for c in boucles if sum(e.calc_length() for e in c) < perim_max]
+    if petites:
+        for comp in petites:
+            bmesh.ops.holes_fill(bm, edges=comp, sides=0)
+        bmesh.ops.triangulate(bm, faces=bm.faces[:])
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+        print(f"  [pores] {ob.name}: {len(petites)} micro-trou(s) bouché(s) (périmètre < {perim_max} mm)")
+    bm.to_mesh(ob.data); bm.free()
+    return ob
+
 def nettoyer(ob):
     bpy.context.view_layer.objects.active = ob; bpy.ops.object.select_all(action='DESELECT'); ob.select_set(True)
     bpy.ops.object.mode_set(mode='EDIT'); bpy.ops.mesh.select_all(action='SELECT')
@@ -171,7 +206,7 @@ def nettoyer(ob):
     bpy.ops.mesh.delete_loose()                 # sommets/arêtes isolés
     bpy.ops.mesh.normals_make_consistent(inside=False)
     bpy.ops.object.mode_set(mode='OBJECT'); ob.select_set(False)
-    return purger_dechets(ob)
+    return boucher_micropores(purger_dechets(ob))
 
 def bbox(ob):
     cs = [ob.matrix_world @ Vector(c) for c in ob.bound_box]
