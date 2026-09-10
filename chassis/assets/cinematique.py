@@ -18,7 +18,7 @@ import os
 import sys
 
 import bpy
-from mathutils import Quaternion, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 V3 = os.path.join(ROOT, "chassis", "v3")
@@ -50,6 +50,9 @@ MPU_CENTRE = (80.0, 0.0, 41.0)     # GW − MPU_X = 80 ; dessus du piédestal à
 Z_WHEEL, Y_WHEEL = AXLE_Z, Y_AXLE  # alias (noms historiques)
 FPS = 30
 F_ORBITE_END, F_ECLATE_END, F_REMONTE_END, F_FIN = 240, 420, 570, 780
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import demo_timeline as TL  # noqa: E402  (chronologie partagée avec l'écran)
 
 # ══════════════════════════════════════════════════════════════════════════
 # matériaux
@@ -224,39 +227,29 @@ for cote in ("D", "G"):
     roues.append(r)
     pneus.append(p)
 
-# pivot d'équilibrage : le corps bascule autour de l'axe des roues
+# ── hiérarchie PHYSIQUE ───────────────────────────────────────────────────
+# `robot` : porte le déplacement et le cap (le contact au sol).
+# `pivot` : enfant de `robot`, porte l'ASSIETTE — le corps penche autour de
+#           l'axe des roues pour tenir l'équilibre.
+# roues   : enfants de `robot` SEULEMENT : elles roulent et pivotent avec lui
+#           mais ne penchent pas avec le corps. C'est ce qui est vrai.
 bpy.ops.object.empty_add(location=PIVOT)
+robot = bpy.context.object
+robot.name = "robot"
+
+bpy.ops.object.empty_add(location=(0.0, 0.0, 0.0))
 pivot = bpy.context.object
 pivot.name = "pivot"
+pivot.parent = robot
+inv_robot = Matrix.Translation(PIVOT).inverted()
+pivot.matrix_parent_inverse = inv_robot
+
 for o in corps:
     o.parent = pivot
-    o.matrix_parent_inverse = pivot.matrix_world.inverted()
-
-# directions d'éclatement (par pièce) — ORDRE DE MONTAGE le long de Y :
-# la coque avant part le plus loin, puis la dalle, la carte, le capteur, le MPU,
-# les servos restent au centre, la coque arrière recule. Vues de CÔTÉ (camera
-# à ~65°), les pièces s'étalent horizontalement et AUCUNE ne peut en masquer une
-# autre (c'était le défaut : la coque avant restait devant la carte et l'écran).
-ECLATE = {
-    "b_front": Vector((0, 150, 0)),
-    "ecran": Vector((0, 90, 0)),
-    "carte": Vector((0, 58, 0)),
-    "hc_sr04": Vector((0, 100, 14)),
-    "transducteur_D": Vector((0, 112, 14)),
-    "transducteur_G": Vector((0, 112, 14)),
-    "cage_D": Vector((0, 116, 14)),
-    "cage_G": Vector((0, 116, 14)),
-    "mpu": Vector((0, 26, 0)),
-    "servo_pied_D": Vector((-40, 0, 0)),
-    "servo_pied_D_bride": Vector((-30, 0, 0)),
-    "servo_pied_G": Vector((40, 0, 0)),
-    "servo_pied_G_bride": Vector((30, 0, 0)),
-    "b_back": Vector((0, -110, 0)),
-    "roue_D": Vector((-58, 0, 0)),
-    "roue_G": Vector((58, 0, 0)),
-    "pneu_D": Vector((-92, 0, 0)),
-    "pneu_G": Vector((92, 0, 0)),
-}
+    o.matrix_parent_inverse = inv_robot
+for o in roues + pneus:
+    o.parent = robot
+    o.matrix_parent_inverse = inv_robot
 
 # ══════════════════════════════════════════════════════════════════════════
 # mise en scène : sol, lumières, environnement sombre
@@ -383,72 +376,63 @@ scene.render.filepath = os.path.join(FRAMES, "f_")
 scene.frame_start = DEB
 scene.frame_end = FIN or F_FIN
 
-# ── caméra : gros plan sur l'écran (l'UI doit être LISIBLE), recul, orbite vers
-#    une vue LATÉRALE-AVANT, éclaté vu de ce même angle (les pièces s'étalent le
-#    long de Y, donc horizontalement à l'image et toutes visibles), retour de
-#    face pour la démonstration, puis gros plan final sur les yeux.
-#    L'azimut vient de la rotation Z de l'orbite ; placer_camera() ne donne que
-#    la distance et la hauteur (angle 0 : sinon l'angle est compté deux fois).
+# ── CAMÉRA : gros plan d'ouverture sur l'écran (l'interface doit être lisible),
+#    puis on SUIT le robot pendant la démonstration — suivi PARTIEL (60 %) pour
+#    qu'il se déplace dans le cadre au lieu de rester collé au centre — et gros
+#    plan final sur l'écran. L'azimut vient de la rotation Z de l'orbite ;
+#    placer_camera() ne fournit que la distance et la hauteur (angle 0, sinon
+#    l'angle est compté deux fois).
 CAM_KEYS = (
-    (1,     0.0,  115,  72,  72),     # gros plan écran : écran de commande lisible
-    (70,    0.0,  115,  72,  72),     # on tient le plan
-    (150,   0.0,  620, 118, 104),     # recul : robot entier, de face
-    (240,  62.0,  800, 130, 104),     # orbite → LATÉRAL-AVANT (~62°)
-    (420,  74.0,  780, 150, 104),     # ÉCLATÉ vu de côté, CAMÉRA PROCHE : les
-                                      # pièces écartées restent grandes à l'image
-    (570,  74.0,  820, 140, 104),     # remontage, même angle
-    (650,  30.0,  820, 118, 100),     # retour vers la face
-    (700,   8.0,  430, 100,  90),     # on se rapproche du visage
-    (780,   0.0,  200,  84,  76),     # gros plan final : les YEUX lisibles
+    (1,     0.0,  115,  72,  72, 1.0),   # gros plan : écran de commande, IDLE
+    (70,    0.0,  115,  72,  72, 1.0),   # on tient le plan
+    (150,   8.0,  680, 122, 104, 0.8),   # recul : robot entier
+    (215,  14.0,  760, 128, 104, 0.7),   # il hésite (l'assiette oscille)
+    (310,  18.0,  830, 120, 108, 0.6),   # IL AVANCE
+    (400,  20.0,  800, 118, 106, 0.6),   # il freine, puis recule
+    # PENDANT LES VIRAGES LA CAMÉRA GARDE SON AZIMUT : c'est ce qui rend le
+    # lacet lisible à l'image. Si elle orbitait dans le même sens que le robot,
+    # les deux rotations s'annuleraient et il paraîtrait toujours de face.
+    (505,  22.0,  780, 115, 100, 0.6),   # virage
+    (620,  24.0,  800, 118, 100, 0.6),   # contre-virage
+    (706,  20.0,  700, 118, 100, 0.7),   # il se stabilise
+    (780,   2.0,  240,  92,  78, 1.0),   # gros plan final : l'écran lisible
 )
-for f, angle, dist, haut, cible in CAM_KEYS:
+for f, angle, dist, haut, cible, suivi in CAM_KEYS:
+    tx, ty = TL.position(f)
+    orbite.location = (X_MID + suivi * tx, suivi * ty, 88.0)
+    orbite.keyframe_insert("location", frame=f)
     orbite.rotation_euler = (0, 0, math.radians(angle))
     orbite.keyframe_insert("rotation_euler", frame=f)
     placer_camera(0.0, dist, haut, cible)
     cam.keyframe_insert("location", frame=f)
 
-# éclairage RENFORCÉ pendant l'éclaté : les pièces s'écartent et chacune se
-# retrouve isolée dans un studio sombre. Les matériaux étant métalliques (ils ne
-# font que RÉFLÉCHIR), elles devenaient noires sur fond noir — mesuré : 1,5 % de
-# l'image seulement était lumineux à l'image 420, alors que les pièces y sont
-# toutes (projection : 17,6 %). D'où le boost, relâché au remontage.
-for _nom in ("cle_orange", "contre_blanc", "rasante_chaude", "dessus_froid"):
-    _ob = bpy.data.objects.get(_nom)
-    if _ob is None:
-        continue
-    _e0 = _ob.data.energy
-    for _f, _k in ((F_ORBITE_END, 1.0), (F_ECLATE_END, 2.6), (F_REMONTE_END, 1.0)):
-        _ob.data.energy = _e0 * _k
-        _ob.data.keyframe_insert("energy", frame=_f)
+# ── DÉMONSTRATION : le robot roule, tourne et tient son équilibre ───────────
+# Tout sort de chassis/assets/demo_timeline.py — le MÊME fichier qui dessine
+# l'écran : le mouvement et l'affichage ne peuvent pas se désynchroniser.
+# Échantillonnage toutes les 2 images : l'assiette porte une micro-oscillation
+# permanente, des clés éparses la lisseraient et tueraient l'effet « il hésite ».
+for f in range(1, (FIN or F_FIN) + 1, 2):
+    tx, ty = TL.position(f)
+    robot.location = (PIVOT[0] + tx, PIVOT[1] + ty, PIVOT[2])
+    robot.rotation_euler = (0.0, 0.0, math.radians(TL.lacet(f)))
+    robot.keyframe_insert("location", frame=f)
+    robot.keyframe_insert("rotation_euler", frame=f)
 
-# éclatement / remontage de chaque pièce
-pieces = {o.name: o for o in bpy.data.objects if o.type == "MESH" and o.name in ECLATE}
-for nom, obj in pieces.items():
-    d = ECLATE[nom]
-    pos_a = Vector(obj.matrix_parent_inverse @ Vector(obj.location)) if obj.parent else Vector(obj.location)
-    pos_a = Vector(obj.location)
-    pos_e = pos_a + d
-    for f, p in ((1, pos_a), (F_ORBITE_END, pos_a), (F_ECLATE_END, pos_e), (F_REMONTE_END, pos_a)):
-        obj.location = p
-        obj.keyframe_insert("location", frame=f)
-
-# phase D : le robot fonctionne
-# roues qui tournent autour de l'axe X (quaternions : la base oriente la roue,
-# la rotation d'avant appliquée à gauche fait tourner autour de l'axe des roues)
-for r, cote in ((roues[0], "D"), (roues[1], "G"), (pneus[0], "D"), (pneus[1], "G")):
-    sens = ROUE[cote][1]
-    base = Quaternion((0, 1, 0), sens * math.pi / 2)
-    for f, tours in ((F_REMONTE_END, 0.0), (F_REMONTE_END + 90, 1.0), (F_FIN, 3.2)):
-        r.rotation_quaternion = Quaternion((1, 0, 0), tours * 2 * math.pi) @ base
-        r.keyframe_insert("rotation_quaternion", frame=f)
-# équilibrage : le corps tangue doucement autour de l'axe des roues
-for f, deg in ((F_REMONTE_END, 0), (F_REMONTE_END + 45, 3.2), (F_REMONTE_END + 90, -3.0),
-               (F_REMONTE_END + 135, 2.2), (F_FIN, 0.0)):
-    pivot.rotation_euler = (math.radians(deg), 0, 0)
+    # signe : dans le repère de Blender, une rotation +X fait basculer le HAUT du
+    # corps vers −Y, soit vers l'ARRIÈRE (le robot regarde +Y). Le tangage du
+    # fichier est exprimé « + = vers l'avant », donc on l'inverse ici.
+    pivot.rotation_euler = (-math.radians(TL.tangage(f)), math.radians(TL.roulis(f)), 0.0)
     pivot.keyframe_insert("rotation_euler", frame=f)
-# (pas de balayage de tête : le châssis ne comporte que les 2 servos de roue)
-# (clignements et expressions : ils sont DANS la texture de l'écran — le
-#  firmware dessine le visage, on affiche le firmware)
+
+    # les deux roues tournent à des vitesses DIFFÉRENTES en virage, et leur
+    # rotation colle à la distance parcourue (sinon on les voit patiner)
+    tr_g, tr_d = TL.tours_roue(f)
+    for obj, tours, cote in ((roues[0], tr_d, "D"), (roues[1], tr_g, "G"),
+                             (pneus[0], tr_d, "D"), (pneus[1], tr_g, "G")):
+        sens = ROUE[cote][1]
+        base = Quaternion((0, 1, 0), sens * math.pi / 2)
+        obj.rotation_quaternion = Quaternion((1, 0, 0), tours * 2 * math.pi) @ base
+        obj.keyframe_insert("rotation_quaternion", frame=f)
 
 # (Interpolation : laissée à Bézier/EASE AUTO, le défaut de Blender. Le réglage
 #  explicite `action.fcurves` a été retiré par Blender 5 — API « slots ».)

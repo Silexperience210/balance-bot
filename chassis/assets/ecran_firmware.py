@@ -20,6 +20,8 @@ import os
 
 from PIL import Image, ImageDraw, ImageFont
 
+import demo_timeline as TL
+
 W, H = 320, 170
 ICI = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.normpath(os.path.join(ICI, "..", "render", "ecran"))
@@ -163,32 +165,20 @@ def ecran_visage(expr="calme", blink=False, gaze=0.0, rouge=False):
 
 
 # ── chronologie ───────────────────────────────────────────────────────────
+def batterie(n):
+    """Tension qui descend lentement (7,98 → 7,66 V sur la démo)."""
+    return 7.98 - 0.00041 * n
+
+
 def image(n):
-    """n : numéro d'image (1..780)."""
-    if n < F_BASCULE:
-        # doigt sur le bouton EQUIL. vers l'image 300, puis armé (vert → STOP)
-        t = (n - 1) / 30.0
-        presse = 1 if 290 <= n <= 302 else -1
-        arme = n > 300
-        pitch = 1.2 * math.sin(t * 0.7) + (0.25 if arme else 0.0)
-        return ecran_manuel(arme, pitch, 7.98 - 0.0004 * n, None, presse,
-                            "AUTO" if arme else "MANUEL")
-    # bascule rapide (effacement en 4 bandes, comme le firmware)
-    reste = F_BASCULE + 4 - n
-    if reste > 0:
-        im = ecran_manuel(True, 0.3, 7.9, None, -1, "AUTO")
-        d = ImageDraw.Draw(im)
-        bande = W / 4
-        efface = (4 - reste) * bande
-        if efface > 0:
-            d.rectangle([0, 0, efface, H], fill=NOIR)
-        return im
-    # visage : regard qui suit le tangage, deux clignements, puis yeux rieurs
-    t = (n - F_BASCULE) / 30.0
-    blink = (0 < (n % 78) < 3) or (62 < (n % 78) < 65)
-    gaze = 9.0 * math.sin(t * 1.1)
-    expr = "content" if n > F_BASCULE + 150 else "calme"
-    return ecran_visage(expr, blink, gaze)
+    """UNE seule scène : la démonstration.
+
+    L'écran de commande du firmware, avec le bouton tactile qui s'allume en même
+    temps que le robot bouge et la télémétrie qui suit l'assiette RÉELLE — le
+    mouvement et l'écran sortent du même fichier (demo_timeline.py), ils ne
+    peuvent donc pas se désynchroniser.
+    """
+    return ecran_manuel(TL.arme(n), TL.tangage(n), batterie(n), None, TL.bouton(n))
 
 
 def main():
