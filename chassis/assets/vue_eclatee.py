@@ -131,13 +131,13 @@ back.location = (0, -E_SHELL, 0)
 
 # ── roues + bandes TPU (pièces réelles) ───────────────────────────────────
 for cote, sx in (("D", -1), ("G", 1)):
-    x = X_MID + sx * (TRACK / 2 + E_WHEEL)
+    x = X_MID + sx * (TRACK / 2)
     roue = importer_stl(f"roue_{cote}", os.path.join(V3, "coin_wheel.stl"), MAT_ROUE)
-    # la roue est modélisée axe en Z (impression) : on la couche axe en X
-    roue.rotation_euler = (0, math.pi / 2, 0)
+    # moyeu vers l'intérieur du corps (miroir entre gauche et droite)
+    roue.rotation_euler = (0, -sx * math.pi / 2, 0)
     roue.location = (x, Y_WHEEL, Z_WHEEL)
     pneu = importer_stl(f"pneu_{cote}", os.path.join(V3, "coin_tire.stl"), MAT_TPU)
-    pneu.rotation_euler = (0, math.pi / 2, 0)
+    pneu.rotation_euler = (0, -sx * math.pi / 2, 0)
     pneu.location = (x + sx * 10.0, Y_WHEEL, Z_WHEEL)
 
 # ── servos (4 × 9 g) : 2 de pied (axe horizontal) + 2 de tête ─────────────
@@ -233,7 +233,7 @@ for o in bpy.data.objects:
 for cote, sx in (("D", -1), ("G", 1)):
     x = X_MID + sx * (TRACK / 2)
     bpy.data.objects[f"roue_{cote}"].location = (x, Y_WHEEL, Z_WHEEL)
-    bpy.data.objects[f"pneu_{cote}"].location = (x + sx * 4.5, Y_WHEEL, Z_WHEEL)
+    bpy.data.objects[f"pneu_{cote}"].location = (x, Y_WHEEL, Z_WHEEL)
     bpy.data.objects[f"servo_pied_{cote}"].location = (
         X_MID + sx * (TRACK / 2 - 13.0 - 1.5 - 11.25), Y_WHEEL, Z_WHEEL)
     bpy.data.objects[f"servo_pied_{cote}_bride"].location = (

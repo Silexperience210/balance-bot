@@ -124,6 +124,24 @@ def boite(nom, taille, centre, mat, rot=None):
     return o
 
 
+def dalle(nom, largeur, hauteur, centre, mat):
+    """Dalle = PLAN (et non un cube) : le plan a un UV 0→1 sur toute sa surface,
+    alors que le cube par défaut de Blender a un dépliage en CROIX — la texture
+    n'en affichait qu'un fragment (gros triangle orange au lieu de l'interface)."""
+    bpy.ops.mesh.primitive_plane_add(size=1, location=centre,
+                                     rotation=(math.pi / 2, 0, 0))
+    o = bpy.context.object
+    o.name = nom
+    o.scale = (largeur, hauteur, 1.0)
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    # U inversé : devant le robot, l'axe +X du monde tombe à GAUCHE de l'image
+    # (caméra en +Y) → sans ce miroir, l'interface s'affiche en miroir.
+    for boucle in o.data.uv_layers.active.data:
+        boucle.uv.x = 1.0 - boucle.uv.x
+    habiller(o, mat)
+    return o
+
+
 def cylindre(nom, rayon, longueur, centre, mat, axe="Z", sommets=64):
     rot = {"Z": (0, 0, 0), "X": (0, math.pi / 2, 0), "Y": (math.pi / 2, 0, 0)}[axe]
     bpy.ops.mesh.primitive_cylinder_add(vertices=sommets, radius=rayon, depth=longueur,
@@ -163,7 +181,7 @@ corps += [front, back]
 # (zone active 40,8 × 21,7 mm). L'écran est ANIMÉ : une séquence d'images
 # reproduit le firmware — écran de commande, puis le visage en auto-équilibre.
 carte = boite("carte", (62.0, 1.2, 26.0), (X_SCREEN, 18.0, Z_SCREEN), M_NOIR)
-ecran = boite("ecran", (40.8, 0.5, 21.7), (X_SCREEN, 19.6, Z_SCREEN),
+ecran = dalle("ecran", 40.8, 21.7, (X_SCREEN, 19.6, Z_SCREEN),
               materialiser_ecran(os.path.join(OUT, "ecran", "ecran_0001.png")))
 
 # MPU6050 : piédestal dont le dessus est à z = 42 (l'axe de tangage), centré en y = 0
@@ -214,22 +232,26 @@ for o in corps:
     o.parent = pivot
     o.matrix_parent_inverse = pivot.matrix_world.inverted()
 
-# directions d'éclatement (par pièce)
+# directions d'éclatement (par pièce) — ORDRE DE MONTAGE le long de Y :
+# la coque avant part le plus loin, puis la dalle, la carte, le capteur, le MPU,
+# les servos restent au centre, la coque arrière recule. Vues de CÔTÉ (camera
+# à ~65°), les pièces s'étalent horizontalement et AUCUNE ne peut en masquer une
+# autre (c'était le défaut : la coque avant restait devant la carte et l'écran).
 ECLATE = {
-    "b_front": Vector((0, 62, 0)),
-    "b_back": Vector((0, -62, 0)),
-    "carte": Vector((0, 46, 0)),
-    "ecran": Vector((0, 58, 0)),
-    "mpu": Vector((0, 34, 12)),
-    "hc_sr04": Vector((0, 52, 0)),
-    "transducteur_D": Vector((0, 66, 0)),
-    "transducteur_G": Vector((0, 66, 0)),
-    "cage_D": Vector((0, 72, 0)),
-    "cage_G": Vector((0, 72, 0)),
-    "servo_pied_D": Vector((-34, 22, 0)),
-    "servo_pied_D_bride": Vector((-24, 22, 0)),
-    "servo_pied_G": Vector((34, 22, 0)),
-    "servo_pied_G_bride": Vector((24, 22, 0)),
+    "b_front": Vector((0, 150, 0)),
+    "ecran": Vector((0, 90, 0)),
+    "carte": Vector((0, 58, 0)),
+    "hc_sr04": Vector((0, 100, 14)),
+    "transducteur_D": Vector((0, 112, 14)),
+    "transducteur_G": Vector((0, 112, 14)),
+    "cage_D": Vector((0, 116, 14)),
+    "cage_G": Vector((0, 116, 14)),
+    "mpu": Vector((0, 26, 0)),
+    "servo_pied_D": Vector((-40, 0, 0)),
+    "servo_pied_D_bride": Vector((-30, 0, 0)),
+    "servo_pied_G": Vector((40, 0, 0)),
+    "servo_pied_G_bride": Vector((30, 0, 0)),
+    "b_back": Vector((0, -110, 0)),
     "roue_D": Vector((-58, 0, 0)),
     "roue_G": Vector((58, 0, 0)),
     "pneu_D": Vector((-92, 0, 0)),
@@ -361,16 +383,27 @@ scene.render.filepath = os.path.join(FRAMES, "f_")
 scene.frame_start = DEB
 scene.frame_end = FIN or F_FIN
 
-# orbite : tour complet lent pendant la phase A
-for f, angle in ((1, -30), (F_ORBITE_END, 250)):
+# ── caméra : gros plan sur l'écran (l'UI doit être LISIBLE), recul, orbite vers
+#    une vue LATÉRALE-AVANT, éclaté vu de ce même angle (les pièces s'étalent le
+#    long de Y, donc horizontalement à l'image et toutes visibles), retour de
+#    face pour la démonstration, puis gros plan final sur les yeux.
+#    L'azimut vient de la rotation Z de l'orbite ; placer_camera() ne donne que
+#    la distance et la hauteur (angle 0 : sinon l'angle est compté deux fois).
+CAM_KEYS = (
+    (1,     0.0,  115,  72,  72),     # gros plan écran : écran de commande lisible
+    (70,    0.0,  115,  72,  72),     # on tient le plan
+    (150,   0.0,  620, 118, 104),     # recul : robot entier, de face
+    (240,  62.0,  800, 130, 104),     # orbite → LATÉRAL-AVANT (~62°)
+    (420,  74.0, 1120, 175, 104),     # ÉCLATÉ vu de côté (~74°) : pièces étalées
+    (570,  74.0,  920, 140, 104),     # remontage, même angle
+    (650,  30.0,  820, 118, 100),     # retour vers la face
+    (700,   8.0,  430, 100,  90),     # on se rapproche du visage
+    (780,   0.0,  200,  84,  76),     # gros plan final : les YEUX lisibles
+)
+for f, angle, dist, haut, cible in CAM_KEYS:
     orbite.rotation_euler = (0, 0, math.radians(angle))
     orbite.keyframe_insert("rotation_euler", frame=f)
-# la caméra recule pendant l'éclatement puis revient pour la démonstration
-for f, (dist, haut) in ((1, (760, 112)), (F_ORBITE_END, (760, 112)),
-                        (F_ECLATE_END, (1120, 190)), (F_REMONTE_END, (860, 135)),
-                        (F_FIN, (780, 115))):
-    placer_camera(0, dist, haut)
-    cam.location = cam.location  # position dans le repère de l'orbite
+    placer_camera(0.0, dist, haut, cible)
     cam.keyframe_insert("location", frame=f)
 
 # éclatement / remontage de chaque pièce
