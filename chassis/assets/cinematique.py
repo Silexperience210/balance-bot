@@ -241,8 +241,13 @@ bpy.ops.object.empty_add(location=(0.0, 0.0, 0.0))
 pivot = bpy.context.object
 pivot.name = "pivot"
 pivot.parent = robot
+# le pivot est à l'origine LOCALE du robot (qui est déjà sur l'axe des roues) :
+# son inverse de parent doit donc rester l'IDENTITÉ. Y mettre PIVOT⁻¹ en plus
+# décale tout le corps (mesuré : dalle à (-6,07 ; 19,6 ; 30) au lieu de
+# (58,5 ; 19,6 ; 72)) — les pièces partent avec le pivot, les roues non, et le
+# robot se retrouve monté de travers.
+pivot.matrix_parent_inverse = Matrix.Identity(4)
 inv_robot = Matrix.Translation(PIVOT).inverted()
-pivot.matrix_parent_inverse = inv_robot
 
 for o in corps:
     o.parent = pivot
