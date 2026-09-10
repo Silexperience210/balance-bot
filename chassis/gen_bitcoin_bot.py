@@ -356,8 +356,12 @@ def build_body():
 
     # ═══ SOUSTRACTIONS ═════════════════════════════════════════════════════
     outils = []
-    # ── Fenêtre écran (paysage, zone active 40 × 22 + jeu)
-    sw, sh = 40.6, 22.6
+    # ── Fenêtre écran (paysage) — demande user 10/09 : 56 × 26.
+    #    Ancien : 40.6 × 22.6 (ne laissait pas passer la dalle + son encadrement).
+    #    26 mm = largeur réelle du PCB T-Display-S3 Touch ; 56 mm sur 62 laisse
+    #    une lèvre de 3 mm de chaque côté. La poche PCB derrière (62.6 × 26.6)
+    #    reste plus large → l'épaulement d'appui de la carte est conservé.
+    sw, sh = 56.0, 26.0
     outils.append(boite('win_screen', lcx-sw/2, lcx+sw/2, y_cav_f - 1, yf + 1, lcz-sh/2, lcz+sh/2))
     # ── Dégagement de la dalle : pavé PCB_LEN × PCB_WID juste derrière la face (la dalle+PCB affleurent)
     outils.append(boite('pcb_pocket', lcx - PCB_LEN/2 - 0.3, lcx + PCB_LEN/2 + 0.3, y_pcb - EPS, y_cav_f + EPS, lcz - PCB_WID/2 - 0.3, lcz + PCB_WID/2 + 0.3))
