@@ -399,8 +399,8 @@ CAM_KEYS = (
     # les deux rotations s'annuleraient et il paraîtrait toujours de face.
     (505,  22.0,  780, 115, 100, 0.6),   # virage
     (620,  24.0,  800, 118, 100, 0.6),   # contre-virage
-    (706,  20.0,  700, 118, 100, 0.7),   # il se stabilise
-    (780,   2.0,  240,  92,  78, 1.0),   # gros plan final : l'écran lisible
+    (700,  18.0,  820, 122, 106, 0.5),   # on recule d'un cran : le robot entier
+    (780,  14.0,  860, 124, 106, 0.4),   # PLAN LARGE final : on admire l'ensemble
 )
 for f, angle, dist, haut, cible, suivi in CAM_KEYS:
     tx, ty = TL.position(f)
@@ -410,6 +410,20 @@ for f, angle, dist, haut, cible, suivi in CAM_KEYS:
     orbite.keyframe_insert("rotation_euler", frame=f)
     placer_camera(0.0, dist, haut, cible)
     cam.keyframe_insert("location", frame=f)
+
+# compensation de la loi en carré inverse pendant le léger recul final (×1,05 à
+# 820 mm, ×1,16 à 860 mm par rapport aux 800 mm de référence) : les matériaux
+# métalliques ne font que RÉFLÉCHIR, ils s'éteignent dès qu'on s'éloigne trop.
+for _nom in ("cle_orange", "contre_blanc", "rasante_chaude", "dessus_froid"):
+    _ob = bpy.data.objects.get(_nom)
+    if _ob is None:
+        # AVERTISSEMENT BRUYANT : un « continue » silencieux ici a déjà masqué un
+        # correctif entier (les lampes ne s'appelaient pas comme prévu).
+        raise RuntimeError(f"lampe introuvable : {_nom} — le boost d'éclairage serait ignoré en silence")
+    _e0 = _ob.data.energy
+    for _f, _k in ((620, 1.0), (700, 1.05), (780, 1.16)):
+        _ob.data.energy = _e0 * _k
+        _ob.data.keyframe_insert("energy", frame=_f)
 
 # ── DÉMONSTRATION : le robot roule, tourne et tient son équilibre ───────────
 # Tout sort de chassis/assets/demo_timeline.py — le MÊME fichier qui dessine
