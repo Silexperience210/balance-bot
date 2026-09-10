@@ -118,10 +118,14 @@ static uint32_t g_touchSeq   = 0;
 // ouvrait l'écran STOP — FACE_REVIEW.md constats 2 et 7).
 static bool g_touchLatch = false;
 static uint8_t s_latchOff = 0;      // trames consécutives sans doigt (levée du verrou)
+static bool s_downPhysical = false; // doigt physiquement présent (avant verrou)
+static unsigned long s_lockUntil = 0;  // fin du verrou TEMPOREL de changement de mode
 static bool s_touchSkip = false;    // diagnostic : coupe la lecture I²C (A/B)
 static bool s_intGate   = false;    // ne lire que si INT actif (A/B, ?int=1)
 static unsigned long s_lastPoll = 0;
+static unsigned long s_lastSleepCfg = 0;   // prochaine ré-écriture de DisAutoSleep
 constexpr unsigned long kTouchPollMs = 100;   // balayage de garde sans doigt
+constexpr unsigned long kLockModeMs  = 300;   // verrou temporel après bascule de mode
 
 // ── Boutons tactiles ──────────────────────────────────────────────
 struct TouchZone {
@@ -250,6 +254,21 @@ static_assert(kEyePts <= 40, "xs/ys trop petits pour faceEyePoints()");
 
 void faceEyePoints(int cx, int cy, int w, int h, float angDeg, int inn,
                    int16_t* xs, int16_t* ys, int& n) {
+  // Œil droit : dérivé par MIROIR de l'œil gauche (x → 319 − x) au lieu de
+  // relancer la rotation avec inn = −1. lroundf arrondit à l'opposé de zéro,
+  // ce qui n'est pas symétrique : jusqu'à 24 pixels divergents d'1 px entre
+  // les deux yeux (FINAL_REVIEW constat 8).
+  if (inn < 0) {
+    int16_t xl[kEyePts], yl[kEyePts];
+    int nl = 0;
+    faceEyePoints(WIDTH - 1 - cx, cy, w, h, angDeg, +1, xl, yl, nl);
+    for (int i = 0; i < nl; i++) {
+      xs[i] = (int16_t)(WIDTH - 1 - xl[i]);
+      ys[i] = yl[i];
+    }
+    n = nl;
+    return;
+  }
   const float ht = h * LID_TOP, hb = h * (1.0f - LID_TOP);
   const float a = angDeg * 0.017453293f;  // évite le double émulé de DEG_TO_RAD
   const float ca = cosf(a), sa = sinf(a);
@@ -289,7 +308,7 @@ struct EyeStyle { int w, h; float ang; bool slit; int gazeMax; };
 EyeStyle faceStyle(const FaceFrame& f) {
   EyeStyle s{EYE_W, EYE_H, 6.0f, false, 18};
   switch (f.expr) {
-    case FX_PENCHE:   s.ang = 13.0f; s.h = 57; break;
+    case FX_PENCHE:   s.ang = 13.0f; s.h = 57; s.gazeMax = 16; break;
     case FX_MEFIANT:  s.ang = 15.0f; s.h = 44; s.slit = true; s.gazeMax = 6; break;
     case FX_ENERVE:   s.ang = 26.0f; s.h = 27; s.slit = true; s.gazeMax = 6; break;
     case FX_SURPRISE: s.ang = 3.0f;  s.w = 100; s.h = 76; s.gazeMax = 10; break;
@@ -440,9 +459,12 @@ void faceUpdateStopBar(unsigned long resteMs) {
   g_tft.fillRect(STOP_X + bw, 160, STOP_W - bw, 4, C_DARK);
 }
 
-// Le regard est quantifié par pas de 2 px (une seule fois, à la source) :
-// deux fois moins de redessins d'iris pour un déplacement visuellement
-// identique.
+// Le regard est quantifié par pas de 2 px pour la DÉCISION de redessiner
+// (sameFrame / comparaison avant faceMoveIris) : deux fois moins de
+// déplacements d'iris pour un rendu visuellement identique. La position
+// réellement tracée garde la valeur fine, et c'est la géométrie
+// effectivement dessinée qui est mémorisée dans s_irisL/R — l'effacement
+// incrémental tombe donc toujours au bon endroit (vérifié, constant 15).
 inline int gazeQ(float g) { return ((int)g / 2) * 2; }
 
 // Expression courante + instant d'entrée : sert à l'hystérésis et à la durée
@@ -463,8 +485,14 @@ FaceFrame faceCompute() {
   // Seuils de sortie élargis quand on est déjà « content » : bande morte.
   const bool content = (s_exprCur == FX_CONTENT);
 
-  if (!Balance::imuOk())          f.expr = FX_CHUTE;        // IMU muette
+  // Sécurité d'abord : IMU absente au boot, IMU qui décroche EN COURS, ou
+  // cadence effondrée (mise en sécurité) → visage de détresse. Sans ça, un
+  // robot dont l'IMU lâche gardait un visage impassible (FINAL_REVIEW constat 6).
+  if (!Balance::imuOk() || Balance::imuLost() || Balance::rateLow()) f.expr = FX_CHUTE;
   else if (Balance::isFallen())   f.expr = FX_CHUTE;
+  // Batterie faible : balance.cpp désarme dans la foulée (≤ 1 image), la teinte
+  // ne fait que marquer le coup — l'écran MANUEL affiche déjà « BAT. FAIBLE ».
+  // En aperçu web la branche n'est pas atteinte (calcul court-circuité) : assumé.
   else if (g_state.batteryLow)  { f.expr = FX_MEFIANT; f.red = true; }
   else if (ar > 60.0f)            f.expr = FX_SURPRISE;
   else if (ap > 8.0f || ar > 40.0f) { f.expr = FX_ENERVE; f.red = true; }
@@ -512,12 +540,14 @@ void faceEnter() {
   g_state.cmdForward = 0;            // aucune consigne héritée du mode MANUEL
   g_state.cmdTurn    = 0;
   g_touchLatch  = true;              // l'appui d'armement n'est pas un « tap »
+  s_lockUntil   = millis() + kLockModeMs;   // + verrou temporel (constat 11)
 }
 
 // Sortie du mode AUTO : même verrou, pour que le doigt qui vient de toucher
 // STOP ne soit pas relu comme un appui sur une flèche (le robot se ré-armait).
 void faceLeave() {
   g_touchLatch = true;
+  s_lockUntil  = millis() + kLockModeMs;
   resetManualCaches();
 }
 
@@ -526,22 +556,35 @@ bool sameFrame(const FaceFrame& a, const FaceFrame& b) {
          gazeQ(a.gaze) == gazeQ(b.gaze);
 }
 
+// Levée du verrou d'appui : 2 trames consécutives sans doigt (une lecture I²C
+// ratée ne doit pas la déclencher). Appelée depuis TOUS les chemins « pas de
+// doigt » — les filtres compris, sinon une trame poubelle intercalée remettait
+// le compteur à zéro sans l'incrémenter et le verrou restait armé à vie
+// (FINAL_REVIEW constat 4).
+void touchLiftLatch() {
+  if (g_touchLatch && ++s_latchOff >= 2) { g_touchLatch = false; s_latchOff = 0; }
+}
+
 void readTouch() {
   const bool wasTouched = g_touchedRaw;
   g_touchedRaw = false;
   g_touchX = -1; g_touchY = -1;
-  if (s_touchSkip) return;            // diagnostic A/B (cf. /api/touch?skip=1)
+  if (s_touchSkip) { s_downPhysical = false; return; }   // diagnostic A/B
 
-  // Garde INT (optionnelle, /api/touch?int=1) : ne lire le contrôleur que
-  // si la broche INT signale un doigt, ou toutes les kTouchPollMs pour ne
-  // pas rater un tap court. Évite de réveiller le CST816 pour rien.
-  const bool intActif = (digitalRead(PIN_TOUCH_INT) == LOW);
-  if (s_intGate && !intActif && !wasTouched &&
-      (millis() - s_lastPoll) < kTouchPollMs) {
-    if (g_touchLatch && ++s_latchOff >= 2) { g_touchLatch = false; s_latchOff = 0; }
-    return;
+  // Garde INT (optionnelle, /api/touch?int=1) : ne lire le contrôleur que si
+  // la broche INT signale un doigt, ou toutes les kTouchPollMs pour ne pas
+  // rater un tap court. Désactivée par défaut (s_intGate = false) : le
+  // contrôleur répond vite depuis que son auto-sleep est désactivé.
+  if (s_intGate) {
+    const bool intActif = (digitalRead(PIN_TOUCH_INT) == LOW);
+    if (!intActif && !wasTouched && (millis() - s_lastPoll) < kTouchPollMs) {
+      s_downPhysical = false;
+      touchLiftLatch();
+      return;
+    }
+    s_lastPoll = millis();
   }
-  s_lastPoll = millis();
+
   // Chronométrage de la transaction I²C du CST816 : c'est le seul appel de
   // Ui::loop() qui peut attendre un esclave (le reste est du dessin borné).
   const unsigned long tI2c = micros();
@@ -551,21 +594,20 @@ void readTouch() {
     if (dt > g_state.dbgTouchMaxMs) g_state.dbgTouchMaxMs = (uint16_t)min(dt, 65535UL);
   }
   if (!ok) {
-    // Aucun doigt : c'est ICI que le verrou de changement de mode doit être
-    // levé (2 trames sans doigt pour absorber une lecture I²C ratée). Le
-    // lever plus bas était un bug : la fonction sortait avant, donc le
-    // verrou restait armé à vie et avalait TOUS les taps (plus de STOP).
-    if (g_touchLatch && ++s_latchOff >= 2) { g_touchLatch = false; s_latchOff = 0; }
+    // Aucun doigt : c'est ICI que le verrou de changement de mode est levé.
+    // (Le lever plus bas était le bug de 871811f : la fonction sortait avant,
+    // donc le verrou restait armé à vie et avalait TOUS les taps.)
+    s_downPhysical = false;
+    touchLiftLatch();
     return;
   }
-  s_latchOff = 0;
 
   // MULTI-TOUCH : le contrôleur peut annoncer 2 points ; on ne garde QUE le
   // point 0. getPoint(1) est de toute façon inutilisable : TouchLib le lit
   // dans raw_data[16..18] alors que le tampon fait 13 octets
   // (CSTSelfConstants.h:66-71 vs ModulesCSTSelf.tpp:128) — lecture hors
   // tableau. Ne pas « améliorer » cette fonction en itérant sur les points.
-  if (g_touch->getPointNum() == 0) return;
+  const uint8_t np = g_touch->getPointNum();
   const TP_Point p = g_touch->getPoint(0);
 
   // Trame poubelle : le CST816 émet régulièrement (4095, 4095) = 0xFFF, son
@@ -573,7 +615,21 @@ void readTouch() {
   // sur 11). Sans ce rejet, chaque trame fantôme passait pour un appui et
   // ouvrait l'écran STOP en mode AUTO. Marge large (WIDTH+40) pour ne pas
   // jeter un vrai tap sur le bord du verre.
-  if (p.x > WIDTH + 40 || p.y > HEIGHT + 40) return;
+  // Ces deux filtres comptent comme « PAS de doigt » pour le verrou (constat 4).
+  if (np == 0 || p.x > WIDTH + 40 || p.y > HEIGHT + 40) {
+    s_downPhysical = false;
+    touchLiftLatch();
+    return;
+  }
+  s_latchOff = 0;
+
+  // Verrou TEMPOREL de changement de mode (constat 11) : en plus du verrou
+  // « jusqu'au relâchement », on ignore tout appui pendant 300 ms après une
+  // bascule AUTO ↔ MANUEL. Insensible aux trames perdues (C5), il couvre le
+  // cas où le contrôleur cesse de rapporter 2 images de suite doigt posé —
+  // un doigt sur le quart droit du bouton STOP pouvait alors ré-armer le robot
+  // (intersection STOP ∩ zone 4 = 52 × 66 px).
+  if ((long)(millis() - s_lockUntil) < 0) return;
 
   // ── Repère brut → repère écran (paysage 320×170, tft.setRotation(3)) ──
   // Le point sort de TouchLib DÉJÀ transposé par son setRotation(1) :
@@ -605,14 +661,18 @@ void readTouch() {
   // peut figer la boucle.
   g_touchRawX  = (int16_t)p.x;  g_touchRawY  = (int16_t)p.y;
   g_touchLastX = g_touchX;      g_touchLastY = g_touchY;
-  if (!wasTouched) g_touchSeq++;
+  // Compteur de TAPS : incrémenté sur l'état PHYSIQUE (s_downPhysical), pas
+  // sur g_touchedRaw — le verrou remet ce dernier à false à chaque image, ce
+  // qui faisait grimper n à ~60/s au lieu de +1 par tap (FINAL_REVIEW
+  // constat 9, visible dans tools/touch_log.json : 8 → 21 en 0,27 s).
+  if (!s_downPhysical) g_touchSeq++;
+  s_downPhysical = true;
 
-  // Verrou de changement de mode : on consomme l'appui en cours jusqu'au
-  // relâchement (le point reste mémorisé pour le diagnostic).
-  if (g_touchLatch) {
-    if (!g_touchedRaw) g_touchLatch = false;         // relâché : on reprend
-    else { g_touchedRaw = false; g_touchX = g_touchY = -1; }
-  }
+  // Verrou de changement de mode : l'appui en cours est consommé jusqu'au
+  // relâchement (le point reste mémorisé pour le diagnostic). La LEVÉE se
+  // fait dans touchLiftLatch(), sur les chemins « pas de doigt » — pas ici
+  // (c'était le bug de 871811f : sortie avant la levée, verrou armé à vie).
+  if (g_touchLatch) { g_touchedRaw = false; g_touchX = g_touchY = -1; }
 }
 
 // Mode AUTO : le visage occupe l'écran. Un tap ouvre l'écran STOP (retour
@@ -625,9 +685,11 @@ void uiAutoLoop() {
   const bool tap = g_touchedRaw && !s_prevTouch;
   s_prevTouch = g_touchedRaw;
 
-  // Entrée en AUTO : effacer le pourtour de l'écran en 4 bandes (une par
-  // image) pour ne jamais dépasser le budget de 15 ms — un fillScreen coûte
-  // ~22 ms, et les deux zones d'yeux sont effacées par faceDraw().
+  // Entrée en AUTO : effacer le pourtour de l'écran en 4 bandes, UNE PAR
+  // IMAGE : on sort après chaque bande, sinon la 1re image cumulait la bande
+  // 0 (17 280 px) et le dessin complet du visage (35 110 px) = 52 390 px
+  // ≈ 21 ms, pile à l'armement (FINAL_REVIEW constat 3). Coût du retour
+  // anticipé : le visage apparaît 4 images (64 ms) plus tard.
   if (s_clearStep < 4) {
     switch (s_clearStep) {
       case 0: g_tft.fillRect(0,   0, WIDTH, 54, C_BG); break;   // bandeau + labels
@@ -636,6 +698,7 @@ void uiAutoLoop() {
       case 3: g_tft.fillRect(279, 54, 41, 88, C_BG); break;     // bord droit
     }
     s_clearStep++;
+    return;
   }
 
   if (s_stopShown) {
@@ -817,6 +880,22 @@ static void drawStatic() {
   for (int i = 0; i < g_zoneCount; i++) drawButton(i);
 }
 
+// Ré-armement périodique du DisAutoSleep (FINAL_REVIEW constat 12) : le
+// registre 0xFE est volatil côté CST816 — s'il se réinitialise (creux
+// d'alimentation, reset de la nappe), l'auto-sleep revient et avec lui les
+// blocages de 1 s du bus I²C. Une écriture toutes les 10 s (~80 µs) rend le
+// correctif auto-réparant, pour un coût marginal négligeable (600 lectures
+// tactiles par écriture).
+void ensureAutoSleepOff() {
+  if (!g_touch) return;
+  if ((long)(millis() - s_lastSleepCfg) < 0) return;   // pas encore l'heure
+  s_lastSleepCfg = millis() + 10000;
+  Wire.beginTransmission(CTS820_SLAVE_ADDRESS);
+  Wire.write((uint8_t)0xFE);
+  Wire.write((uint8_t)0x01);
+  Wire.endTransmission();
+}
+
 void Ui::setTouchSkip(bool skip) { s_touchSkip = skip; }
 void Ui::setIntGate(bool on)     { s_intGate = on; }
 
@@ -881,6 +960,8 @@ bool Ui::begin() {
 // ── loop() ────────────────────────────────────────────────────────
 void Ui::loop() {
   if (!g_initialized) return;
+
+  ensureAutoSleepOff();   // auto-réparation du correctif anti-blocage (10 s)
 
   // ── 0. Mode AUTO (ou aperçu web) : le visage occupe l'écran ──────
   static bool s_wasAuto = false;

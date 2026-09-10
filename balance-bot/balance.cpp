@@ -617,6 +617,13 @@ bool isFallen() { return s_fallen; }
 
 bool imuOk() { return s_imuOk; }
 
+// Perte d'IMU À CHAUD (trames manquantes au-delà de kImuFailMax) et mise en
+// sécurité de cadence (< kMinLoopHz). Distincts de imuOk(), figé au boot :
+// sans eux, un robot dont l'IMU décroche ou dont la cadence s'effondre gardait
+// un visage impassible (FINAL_REVIEW constat 6).
+bool imuLost() { return s_imuLost; }
+bool rateLow() { return s_rateLow; }
+
 // ── Réglage à chaud des gains (banc web — tuner.cpp) ───────────────
 // Bornées : une valeur aberrante envoyée depuis le téléphone (doigt qui
 // dérape, requête tronquée) ne doit pas pouvoir faire diverger le PID.

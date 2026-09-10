@@ -100,6 +100,8 @@ void loop() {
     unsigned long dt = (micros() - t0) / 1000UL;  // ms arrondi bas
     if (dt > g_state.dbgUiMs) g_state.dbgUiMs = (uint8_t)min(dt, 255UL);
     if (dt > g_state.dbgUiMaxMs) g_state.dbgUiMaxMs = (uint16_t)min(dt, 65535UL);
+    s_lastPhase = 1;   // FINAL_REVIEW constat 2 : sans ça, un blocage de
+                       // Ui::loop() était étiqueté « phase 0 = balance »
   }
 
   // ── Tête + ultrason : 50 Hz (l'ultrason est auto-cadencé à 10 Hz
@@ -160,6 +162,7 @@ void loop() {
     unsigned long dt = (micros() - loopT0) / 1000UL;
     if (dt > g_state.dbgLoopMs) g_state.dbgLoopMs = (uint8_t)min(dt, 255UL);
     if (dt > g_state.dbgLoopMaxMs) g_state.dbgLoopMaxMs = (uint16_t)min(dt, 65535UL);
-    s_prevLoopMs = g_state.dbgLoopMs;
+    s_prevLoopMs = (uint8_t)min(dt, 255UL);   // durée de CETTE itération, pas
+                                              // le max de la seconde (constat 2)
   }
 }

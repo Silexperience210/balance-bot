@@ -66,6 +66,8 @@ namespace Balance {
   bool  isEnabled();             // ARMÉ (commande) — ≠ g_state.balancing (debout)
   bool  isFallen();              // verrou de chute actif (attend le redressement)
   bool  imuOk();                 // true si MPU6050 répond
+  bool  imuLost();               // IMU muette EN COURS (> kImuFailMax trames)
+  bool  rateLow();               // cadence sous kMinLoopHz → arrêt de sécurité
   // Réglage à chaud (module D — banc web). Ajout non intrusif : la boucle
   // d'équilibre lit simplement des variables au lieu de constantes.
   void  setGains(float kp, float ki, float kd);  // bornés 0-100 / 0-2000 / 0-20

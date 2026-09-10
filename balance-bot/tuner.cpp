@@ -175,8 +175,12 @@ void handleState() {
   float kp, ki, kd, kpPhi, kv;
   Balance::getGains(kp, ki, kd);
   Balance::getRecenterGains(kpPhi, kv);
-  char buf[384];
-  snprintf(buf, sizeof(buf),
+  // 512 o : les 19 champs de cadence ajoutés cette nuit font ~354 o en usage
+  // réel et jusqu'à ~410 o compteurs saturés — l'ancien tampon de 384 o
+  // laissait 30 o de marge et aurait produit un JSON tronqué (page « hors
+  // ligne… » à vie) — FINAL_REVIEW constat 1. On teste le retour.
+  char buf[512];
+  const int len = snprintf(buf, sizeof(buf),
            "{\"pitch\":%.1f,\"rate\":%.0f,\"footL\":%d,\"footR\":%d,"
            "\"hz\":%.0f,\"kp\":%.1f,\"ki\":%.0f,\"kd\":%.2f,"
            "\"kpphi\":%.1f,\"kv\":%.1f,"
@@ -201,6 +205,10 @@ void handleState() {
            (unsigned)g_state.dbgHeadMaxMs, (unsigned)g_state.dbgBatMaxMs,
            (unsigned)g_state.dbgLoopMaxMs,
            (unsigned)g_state.dbgTouchMaxMs, (unsigned)g_state.dbgDrawMaxMs);
+  if (len < 0 || len >= (int)sizeof(buf)) {
+    s_server.send(500, "text/plain", "json trop long");
+    return;
+  }
   s_server.send(200, "application/json", buf);
 }
 
@@ -219,10 +227,10 @@ float argOrNan(const char* name) {
   return f;
 }
 
-// Diagnostic du repère tactile — TOUCH_REVIEW.md §4. Endpoint séparé (et
-// non un ajout à /api/state) : le tampon de handleState fait 256 o pour
-// ~160 o déjà consommés, une troncature silencieuse produirait un JSON
-// invalide et la page afficherait « hors ligne… ».
+// Diagnostic du repère tactile — TOUCH_REVIEW.md §4. Endpoint séparé (et non
+// un ajout à /api/state) : le tampon de handleState est passé à 512 o pour
+// absorber les 19 champs de cadence (FINAL_REVIEW constat 1) ; garder ce
+// diagnostic ici évite de rapprocher les deux charges du même tampon.
 // La valeur est RÉMANENTE : taper un coin, puis charger cette page.
 void handleTouch() {
   touchReq();
