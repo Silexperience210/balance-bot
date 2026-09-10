@@ -133,33 +133,66 @@ def points_amande(cx, cy, w, h, ang_deg, inn):
     return pts
 
 
-def style(expr, blink):
-    """faceStyle() : (w, h, angle) par expression."""
-    st = {"calme": (EYE_W, EYE_H, 6.0), "penche": (EYE_W, 57, 13.0),
-          "content": (95, 55, 4.0), "surprise": (100, 76, 3.0)}[expr]
-    w, h, ang = st
-    return (w, 8, ang) if blink else (w, h, ang)
+def style(expr, blink, clin=False):
+    """faceStyle() de ui.cpp : (w, h, angle, fente, débattement du regard)."""
+    st = {
+        "calme":    (EYE_W, EYE_H, 6.0,  False, 18),
+        "penche":   (EYE_W, 57,    13.0, False, 16),
+        "mefiant":  (EYE_W, 44,    15.0, True,  6),
+        "enerve":   (EYE_W, 27,    26.0, True,  6),
+        "surprise": (100,   76,    3.0,  False, 10),
+        "content":  (95,    55,    4.0,  False, 0),
+        "clin":     (100,   73,    4.0,  False, 10),
+    }[expr]
+    w, h, ang, slit, gmax = st
+    if clin:
+        # LE CLIN D'ŒIL : l'œil gauche reste OUVERT (h = 73) et c'est son IRIS
+        # qu'on omet (cf. ecran_visage) — sinon les deux yeux se ferment et ça
+        # ne ressemble plus à un clin d'œil.
+        w, h, ang, slit, gmax = 100, 73, 4.0, False, 10
+    elif blink:
+        h = 8
+    return w, h, ang, slit, gmax
 
 
-def ecran_visage(expr="calme", blink=False, gaze=0.0, rouge=False):
+def ecran_visage(expr="calme", blink=False, gaze=0.0, clin=False, rouge=False):
+    """Le visage : amandes + iris (fendu si l'expression le demande) + reflet.
+
+    clin=True ferme l'œil GAUCHE (le droit reste ouvert) : c'est le clin d'œil
+    final. Le regard est borné par le débattement propre à l'expression, comme
+    dans faceIrisGeom().
+    """
     im = Image.new("RGB", (W, H), NOIR)
     d = ImageDraw.Draw(im)
-    w, h, ang = style(expr, blink)
+    w, h, ang, slit, gmax = style(expr, blink, clin)
     col = ROUGE if rouge else ORANGE
     hb = int(h * (1.0 - LID_TOP))
     r = int(hb * IRIS_R)
     for cx, inn in ((FACE_CX_L, +1), (FACE_CX_R, -1)):
+        if expr == "content":
+            # YEUX RIEURS : l'amande pleine ne suffit pas (elle donne un arc
+            # cassé sur le côté). Un trait épais en ∩ se lit immédiatement
+            # comme une joie — c'est le seul cas où on ne remplit pas l'œil.
+            # SAUF l'œil du clin d'œil, qui se ferme : sans ça le clin est
+            # invisible puisque « content » prime sur l'expression « clin ».
+            if clin and inn == +1:
+                d.polygon(points_amande(cx, FACE_CY, w, 14, 4.0, inn), fill=col)
+                continue
+            d.arc([cx - w // 2, FACE_CY - h // 2 - 10, cx + w // 2, FACE_CY + h // 2 + 10],
+                  180, 360, fill=col, width=15)
+            continue
         pts = points_amande(cx, FACE_CY, w, h, ang, inn)
         d.polygon(pts, fill=col)
-        if blink:
+        if blink or (clin and inn == +1):     # œil fermé (ou clin d'œil)
             continue
-        ix = cx + int(max(-18, min(18, gaze)))
+        ix = cx + int(max(-gmax, min(gmax, gaze)))
         iy = FACE_CY + int(hb * 0.30)
-        if expr == "content":
-            d.arc([cx - w // 2 + 8, FACE_CY - w // 2 + 18, cx + w // 2 - 8, FACE_CY + w // 2 - 6],
-                  90, 270, fill=NOIR, width=6)
-            continue
-        d.ellipse([ix - r, iy - r, ix + r, iy + r], fill=NOIR)
+        if slit:
+            # pupille FENDUE (méfiant, énervé) : étroite et haute
+            bw = max(3, r // 4)
+            d.ellipse([ix - bw, iy - r, ix + bw, iy + r], fill=NOIR)
+        else:
+            d.ellipse([ix - r, iy - r, ix + r, iy + r], fill=NOIR)
         d.ellipse([ix - r + 3, iy - r + 1, ix - r + 8, iy - r + 6], fill=BLANC)
     return im
 
@@ -171,14 +204,14 @@ def batterie(n):
 
 
 def image(n):
-    """UNE seule scène : la démonstration.
+    """UNE seule scène : la DÉMONSTRATION, visage à l'écran.
 
-    L'écran de commande du firmware, avec le bouton tactile qui s'allume en même
-    temps que le robot bouge et la télémétrie qui suit l'assiette RÉELLE — le
-    mouvement et l'écran sortent du même fichier (demo_timeline.py), ils ne
-    peuvent donc pas se désynchroniser.
+    Ce qu'affiche la dalle — expression, clignement, regard, clin d'œil — sort
+    de demo_timeline.py, le MÊME fichier qui fait bouger le robot dans le rendu
+    3D : les yeux et le mouvement ne peuvent donc pas se désynchroniser.
     """
-    return ecran_manuel(TL.arme(n), TL.tangage(n), batterie(n), None, TL.bouton(n))
+    expr, blink, gaze, clin = TL.visage(n)
+    return ecran_visage(expr, blink, gaze, clin)
 
 
 def main():

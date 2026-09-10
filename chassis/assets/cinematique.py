@@ -257,18 +257,71 @@ for o in roues + pneus:
     o.matrix_parent_inverse = inv_robot
 
 # ══════════════════════════════════════════════════════════════════════════
-# mise en scène : sol, lumières, environnement sombre
+# mise en scène : la CHAMBRE — parquet clair, mur dégradé chaud, jouets au fond
 # ══════════════════════════════════════════════════════════════════════════
-bpy.ops.mesh.primitive_plane_add(size=1400, location=(X_MID, 0, 0))
+bpy.ops.mesh.primitive_plane_add(size=4000, location=(X_MID, 0, 0))
 sol = bpy.context.object
 sol.name = "sol"
-habiller(sol, metal("sol", (0.012, 0.012, 0.014), 0.18))
+# parquet clair (et non plus le sol noir réfléchissant) : c'est la chambre
+habiller(sol, metal("sol", (0.36, 0.22, 0.11), 0.45))
+
+
+def materiau_degrade(nom, bas, haut, force=0.30):
+    """Mur dégradé : émission colorée du bas vers le haut (fond de studio chaud)."""
+    m = bpy.data.materials.new(nom)
+    m.use_nodes = True
+    nt = m.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    em = nt.nodes.new("ShaderNodeEmission")
+    em.inputs["Strength"].default_value = force
+    grad = nt.nodes.new("ShaderNodeTexGradient")
+    grad.gradient_type = "LINEAR"
+    mapp = nt.nodes.new("ShaderNodeMapping")
+    mapp.inputs["Rotation"].default_value[0] = math.radians(90.0)   # vertical
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.elements[0].color = (*bas, 1.0)
+    ramp.color_ramp.elements[1].color = (*haut, 1.0)
+    nt.links.new(coord.outputs["Generated"], mapp.inputs["Vector"])
+    nt.links.new(mapp.outputs["Vector"], grad.inputs["Vector"])
+    nt.links.new(grad.outputs["Color"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], em.inputs["Color"])
+    nt.links.new(em.outputs["Emission"], out.inputs["Surface"])
+    return m
+
+
+bpy.ops.mesh.primitive_plane_add(size=8000, location=(X_MID, -1700, 1300))
+mur = bpy.context.object
+mur.name = "mur"
+mur.rotation_euler = (math.radians(90), 0, 0)
+habiller(mur, materiau_degrade("mur_degrade", (0.52, 0.34, 0.24), (0.16, 0.11, 0.14)))
+
+# jouets au fond : hors foyer et immobiles, ils donnent l'échelle et le lieu
+def jouet(nom, pos, taille, couleur, sphere=False):
+    if sphere:
+        bpy.ops.mesh.primitive_uv_sphere_add(radius=taille[0] / 2, location=pos)
+    else:
+        bpy.ops.mesh.primitive_cube_add(size=1.0, location=pos)
+    o = bpy.context.object
+    o.name = nom
+    o.scale = taille if not sphere else (1, 1, 1)
+    habiller(o, metal(nom, couleur, 0.55))
+    return o
+
+
+JOUETS = (
+    jouet("jouet_cube_rouge", (X_MID - 210, -560, 70), (140, 140, 140), (0.55, 0.09, 0.07)),
+    jouet("jouet_cube_bleu", (X_MID + 230, -620, 58), (115, 115, 115), (0.10, 0.20, 0.48)),
+    jouet("jouet_balle", (X_MID - 120, -760, 85), (170, 0, 0), (0.80, 0.42, 0.10), sphere=True),
+    jouet("jouet_cube_vert", (X_MID + 330, -760, 48), (96, 96, 96), (0.16, 0.38, 0.18)),
+)
 
 monde = bpy.context.scene.world or bpy.data.worlds.new("World")
 bpy.context.scene.world = monde
 monde.use_nodes = True
 fond = monde.node_tree.nodes["Background"]
-fond.inputs[0].default_value = (0.055, 0.045, 0.045, 1.0)
+fond.inputs[0].default_value = (0.06, 0.05, 0.05, 1.0)
 fond.inputs[1].default_value = 1.0
 
 
@@ -283,10 +336,31 @@ def lampe(nom, pos, energie, taille, couleur=(1.0, 0.55, 0.25)):
     return o
 
 
-lampe("cle_orange", (200, -220, 260), 1700000, 240, (1.0, 0.48, 0.18))
-lampe("contre_blanc", (-160, 200, 200), 950000, 200, (0.85, 0.88, 1.0))
-lampe("rasante_chaude", (60, -300, 60), 620000, 150, (1.0, 0.62, 0.30))
-lampe("dessus_froid", (X_MID, 40, 420), 750000, 300, (0.75, 0.82, 1.0))
+# ── RIG D'ÉCLAIRAGE SOLIDAIRE DU ROBOT ────────────────────────────────────
+# Diagnostic utilisateur : « il n'a pas d'éclairage en face du coup on voit pas ».
+# Les lampes étaient toutes derrière ou au-dessus. On ajoute une VRAIE clé
+# frontale, deux contre-jours, deux remplissages latéraux et un débouché doux
+# au-dessus — et surtout tout le rig est PARENTÉ AU ROBOT : la distance
+# lampe-sujet ne bouge plus, donc l'éclairement reste constant quand le robot
+# se déplace et quand la caméra recule (plus de plan qui s'éteint).
+lampes = [
+    lampe("cle_frontale", (X_MID + 60, 380, 260), 1500000, 300, (1.0, 0.93, 0.86)),
+    lampe("remplissage_gauche", (X_MID - 340, 240, 150), 700000, 260, (0.90, 0.93, 1.0)),
+    lampe("remplissage_droit", (X_MID + 360, 220, 140), 700000, 260, (0.95, 0.90, 0.85)),
+    lampe("contre_arriere", (X_MID, -420, 280), 1100000, 240, (1.0, 0.55, 0.28)),
+    lampe("contre_blanc", (X_MID - 300, -260, 220), 900000, 200, (0.85, 0.88, 1.0)),
+    lampe("dessus_doux", (X_MID, 60, 520), 900000, 400, (1.0, 0.95, 0.90)),
+]
+
+# un empty « rig » recopie la POSITION du robot (pas son cap) : les lampes
+# suivent le sujet sans tourner avec lui. Sans ça, l'éclairement chutait dès que
+# le robot s'éloignait de la zone éclairée — c'était le vrai « on voit rien ».
+bpy.ops.object.empty_add(location=(0.0, 0.0, 0.0))
+rig = bpy.context.object
+rig.name = "rig"
+for _l in lampes:
+    _l.parent = rig
+    _l.matrix_parent_inverse = Matrix.Identity(4)
 
 # ══════════════════════════════════════════════════════════════════════════
 # caméra : orbite parentée à un pivot, distance pilotée
@@ -370,10 +444,20 @@ if MODE == "still":
 
 # ── mode cinématique ──────────────────────────────────────────────────────
 configurer_moteur()
-scene.cycles.samples = 32
+# 16 échantillons + débruitage : la scène a doublé de poids (décor, 6 lampes,
+# mur émissif), 32 échantillons coûtaient ~8 s/image soit près de 2 h. Avec le
+# débruitage OptiX, 16 reste propre.
+scene.cycles.samples = 16
 scene.render.resolution_x = 1280
 scene.render.resolution_y = 720
 scene.render.fps = FPS
+
+# PROFONDEUR DE CHAMP : DÉSACTIVÉE, et c'est un choix argumenté. Avec un 62 mm à
+# 30-70 cm du sujet, une ouverture qui floute le fond (f/2,8) ne laisse net
+# qu'une tranche de quelques millimètres : le robot lui-même devient flou. Et
+# une ouverture fermée ne floute plus rien. Le fond se distingue donc par le
+# DÉCOR (mur dégradé chaud, jouets sobres et hors foyer visuel), pas par l'optique.
+cam.data.dof.use_dof = False
 FRAMES = os.path.join(OUT, "frames")
 os.makedirs(FRAMES, exist_ok=True)
 scene.render.image_settings.file_format = "PNG"
@@ -387,20 +471,31 @@ scene.frame_end = FIN or F_FIN
 #    plan final sur l'écran. L'azimut vient de la rotation Z de l'orbite ;
 #    placer_camera() ne fournit que la distance et la hauteur (angle 0, sinon
 #    l'angle est compté deux fois).
+#    PENDANT LES VIRAGES LA CAMÉRA GARDE SON AZIMUT : c'est ce qui rend le lacet
+#    lisible à l'image. Si elle orbitait dans le même sens que le robot, les deux
+#    rotations s'annuleraient et il paraîtrait toujours de face.
+#    Les distances sont calculées sur le FOV VERTICAL réel : objectif 62 mm,
+#    capteur 36 mm de large en 16/9 → 20,25 mm de haut → demi-angle 9,27°, soit
+#    2·d·tan(9,27°) de hauteur visible. Le robot mesure 201 mm : il n'est ENTIER
+#    qu'à partir de ~700 mm. En dessous, il est coupé — erreur commise en prenant
+#    l'angle HORIZONTAL (32°), ce qui donnait 157 mm de champ à 480 mm.
 CAM_KEYS = (
-    (1,     0.0,  115,  72,  72, 1.0),   # gros plan : écran de commande, IDLE
-    (70,    0.0,  115,  72,  72, 1.0),   # on tient le plan
-    (150,   8.0,  680, 122, 104, 0.8),   # recul : robot entier
-    (215,  14.0,  760, 128, 104, 0.7),   # il hésite (l'assiette oscille)
-    (310,  18.0,  830, 120, 108, 0.6),   # IL AVANCE
-    (400,  20.0,  800, 118, 106, 0.6),   # il freine, puis recule
-    # PENDANT LES VIRAGES LA CAMÉRA GARDE SON AZIMUT : c'est ce qui rend le
-    # lacet lisible à l'image. Si elle orbitait dans le même sens que le robot,
-    # les deux rotations s'annuleraient et il paraîtrait toujours de face.
-    (505,  22.0,  780, 115, 100, 0.6),   # virage
-    (620,  24.0,  800, 118, 100, 0.6),   # contre-virage
-    (700,  18.0,  820, 122, 106, 0.5),   # on recule d'un cran : le robot entier
-    (780,  14.0,  860, 124, 106, 0.4),   # PLAN LARGE final : on admire l'ensemble
+    (1,    14.0,  880, 104, 104, 1.0),   # ouverture : robot entier, à hauteur de jouet
+    (40,   10.0,  820, 106, 104, 1.0),   # léger push-in pendant le réveil
+    (58,   12.0,  840, 106, 108, 1.0),   # il se décide
+    (95,   16.0,  900, 106, 110, 0.92),  # SPRINT 1 (il penche : marge de cadrage)
+    (128,  18.0,  880, 106, 108, 0.95),  # FREINAGE
+    (165,  20.0,  880, 104, 106, 1.0),   # HÉSITATION
+    (205,  22.0,  880, 106, 108, 0.95),  # virage serré
+    (242,  20.0,  880, 106, 108, 0.95),  # contre-virage
+    (285,  16.0,  900, 108, 112, 0.92),  # SPRINT 2
+    (348,  14.0,  880, 106, 108, 0.95),  # FREINAGE
+    (400,  18.0,  880, 104, 106, 1.0),   # pivot
+    (470,  22.0,  880, 106, 108, 0.95),  # marche arrière
+    (540,  18.0,  900, 108, 110, 0.92),  # il repart en avant
+    (620,  14.0,  820, 102, 104, 1.0),   # il se calme
+    (700,   9.0,  300,  96,  96, 1.0),   # GROS PLAN VISAGE : les yeux rieurs
+    (780,   5.0,  150,  84,  76, 1.0),   # LE CLIN D'ŒIL, au plus près des yeux
 )
 for f, angle, dist, haut, cible, suivi in CAM_KEYS:
     tx, ty = TL.position(f)
@@ -411,19 +506,10 @@ for f, angle, dist, haut, cible, suivi in CAM_KEYS:
     placer_camera(0.0, dist, haut, cible)
     cam.keyframe_insert("location", frame=f)
 
-# compensation de la loi en carré inverse pendant le léger recul final (×1,05 à
-# 820 mm, ×1,16 à 860 mm par rapport aux 800 mm de référence) : les matériaux
-# métalliques ne font que RÉFLÉCHIR, ils s'éteignent dès qu'on s'éloigne trop.
-for _nom in ("cle_orange", "contre_blanc", "rasante_chaude", "dessus_froid"):
-    _ob = bpy.data.objects.get(_nom)
-    if _ob is None:
-        # AVERTISSEMENT BRUYANT : un « continue » silencieux ici a déjà masqué un
-        # correctif entier (les lampes ne s'appelaient pas comme prévu).
-        raise RuntimeError(f"lampe introuvable : {_nom} — le boost d'éclairage serait ignoré en silence")
-    _e0 = _ob.data.energy
-    for _f, _k in ((620, 1.0), (700, 1.05), (780, 1.16)):
-        _ob.data.energy = _e0 * _k
-        _ob.data.keyframe_insert("energy", frame=_f)
+# Le rig d'éclairage suit maintenant la position du robot : l'éclairement ne
+# dépend plus ni des déplacements ni du recul de la caméra. L'ancien bricolage
+# qui renforçait les lampes en fonction de la distance focale est supprimé — il
+# ne servait qu'à compenser l'absence de rig, et il échouait silencieusement.
 
 # ── DÉMONSTRATION : le robot roule, tourne et tient son équilibre ───────────
 # Tout sort de chassis/assets/demo_timeline.py — le MÊME fichier qui dessine
@@ -436,6 +522,9 @@ for f in range(1, (FIN or F_FIN) + 1, 2):
     robot.rotation_euler = (0.0, 0.0, math.radians(TL.lacet(f)))
     robot.keyframe_insert("location", frame=f)
     robot.keyframe_insert("rotation_euler", frame=f)
+    # le rig d'éclairage suit la position (mais pas le cap) : éclairement constant
+    rig.location = (tx, ty, 0.0)
+    rig.keyframe_insert("location", frame=f)
 
     # signe : dans le repère de Blender, une rotation +X fait basculer le HAUT du
     # corps vers −Y, soit vers l'ARRIÈRE (le robot regarde +Y). Le tangage du
