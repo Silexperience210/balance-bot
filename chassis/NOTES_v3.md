@@ -74,6 +74,32 @@ creux ₿ à 1,6 mm), 1,05 k mm² (back), 0,59 k mm² (roue), 0 (pneu) → aucun
    après `merge_vertices` les coques sont watertight (back) ou fermées hors ouverture de joint (front).
 
 
+## Révision du 10/09/2026 (baies de servo — le SG90 n'entrait pas)
+
+Vérification par **intersection booléenne EXACTE** servo × coques
+(`review/servo_fit.py`, modèle `review/sg90_model.py`) : **1779 mm³ → 0 mm³**.
+
+| # | Défaut mesuré | Correction |
+|---|---|---|
+| 1 | La cloison `bulk` occupait **exactement** le volume des oreilles (x_face + d·[4,1 ; 6,6], recouvrement 2,5 / 2,5 mm) : le servo butait dessus. 441 mm³. | Cloison déplacée **en amont** des oreilles, soudée à la paroi latérale : x_face − d·0,6 → x_face + d·4,1 (4,1 mm d'épaisseur). |
+| 2 | La boîte `bulk` n'était pas limitée à la cavité → **bosse hors peau** sous l'axe côté panse (matière jusqu'à r = 50,1 pour une peau à r = 46 ; 86 points sondés). | `INTERSECT` avec le glyphe réduit de `WALL−0,6` : la cloison s'arrête 1,8 mm sous la peau. 0 point hors peau. |
+| 3 | Le goujon bas du spine (`pins[0]`, z = 38) tombait **en plein milieu** de la baie du servo spine : plot Ø9 en x 5,5…14,5 / z 33,5…42,5, à travers le corps ET les oreilles. | Descendu à **z = 20** (plot z 15,5…24,5, soit 5,9 mm sous l'oreille basse). Écartement des goujons 141 → 159 mm. |
+| 4 | Fenêtre servo au `SLIDING_FIT` (0,15/face) : trop juste pour les **taquets de moulage** et la bavure de joint du SG90 réel. | Nouvelle constante **`SV_CLR = 1,0`** mm/face. Premier contact mesuré à 1,05 mm. |
+| 5 | Rainure arrêtée à la cloison : la paroi courbe de la panse rentre jusqu'à x = 95,3 sous l'axe → 802 mm³ dans le corps du servo. | Rainure sur **toute la profondeur** du servo (x_face → x_face + d·23,1) + nouveau logement d'oreilles `svear` (SV_FLANGE_T + SV_CLR de profondeur, sur l'envergure 32,2 + 2·SV_CLR). |
+| 6 | Vis d'oreilles **inaccessibles** : les oreilles étaient côté paroi, tête de vis dans un espace mort de 4,1 mm. | Oreilles côté cavité ; avant-trous Ø1,7 **borgnes** percés depuis la cavité, arrêtés 0,4 mm avant la paroi (3,7 mm de prise). Dégagement mesuré : **59,5 / 59,5 / 20,5 mm**. Vis : celles **livrées avec le SG90** (≈ Ø1,9 × 6,5) ou **M2 × 6** — plus M2 × 8 (débouchait sur la peau). |
+| 7 | `pcbplot` bas (Ø5, x 83,7…88,7, z 59,5…64,5) traversait toute la cavité : 0,6 mm au-dessus du corps du servo panse et **pile devant la sortie de câble**. | Plots raccourcis à y ≥ 8,0 (au-delà de ±7,1 = largeur servo + jeu). Toujours tenus par `pcbrib` → rail → parois. |
+| 8 | Piédestal MPU à x = 26,0 pour un servo dont le fond est à x = 24,9 : 1,1 mm. | `MPU_X` 38,0 → **39,0** (2,1 mm). |
+
+**Limites connues, non corrigées** (voir §« à confirmer » du rapport) :
+- Côté **panse**, l'oreille BASSE du servo (z ≈ 31…36) tombe **hors de la peau** de la panse
+  (le cercle de la panse redescend à r = 46 : la matière s'arrête à x ≈ 100,1 à z = 36,1).
+  → **3 vis d'oreille sur 4** seulement (2 spine + 1 panse haute). Le servo est en outre bloqué en
+  rotation par la rainure de cloison et pincé par les 2 coques. Corriger demanderait de toucher
+  l'enveloppe extérieure (interdit par le cahier des charges) ou de coucher le servo (oreilles selon Y).
+- Le **capot oblong** relevé sur la CAO de référence (Ø11,8 débordant de 2,9 mm vers le bout long,
+  4 mm de haut) n'est **pas** au datasheet et n'est pas dégagé : 269 mm³ d'intersection si le servo
+  réel le présente. Le débouchage demanderait d'ovaliser `axR`/`axL` (interdit : trous Ø12,8 gelés).
+
 ## Réglages électriques (rappel POWER_GUIDE)
 - Servos sur 5 V séparé (BEC/buck), GND commun ; jamais le 3V3 de la carte.
 - Firmware : mode FEET_MODE_CONTINUOUS (déjà prêt, Lot 3a) ; constante kAccelPitchSign à vérifier au test.

@@ -27,6 +27,10 @@ SV_FLANGE_Z, SV_FLANGE_T, SV_TAB_SPAN = 15.9, 2.5, 32.2
 SV_HOLE_PITCH, SV_SHAFT_OFF = 27.8, 5.9
 SV_SHAFT_D, SV_SHAFT_PROJ, SV_BOSS_D, SV_BOSS_H = 4.8, 4.5, 11.8, 1.5
 SV_PILOT_D = 1.7
+# Jeu de montage de la baie servo (10/09). Le SG90 réel porte des TAQUETS DE MOULAGE et une
+# bavure au joint de ses 2 demi-coques (~0.5 mm en saillie, non cotés au datasheet) : la fenêtre
+# au SLIDING_FIT (0.15) était au plus juste et le servo n'entrait pas. 1.0 mm par face.
+SV_CLR = 1.0
 PCB_LEN, PCB_WID, PCB_T = 62.00, 26.00, 1.20   # T-Display-S3 Touch RÉEL 62×26 (confirmé user 08/09 soir)
 PCB_FIX_PITCH = 20.01                    # trous réels de la carte
 MPU_L, MPU_W, MPU_T, MPU_HOLE_PITCH = 21.0, 16.0, 2.0, 15.0
@@ -306,12 +310,29 @@ def build_body():
     r_low = (LOW['zt'] - LOW['zb'])/2; cz_low = (LOW['zt'] + LOW['zb'])/2
     x_wall_R = (LOW['xr'] - r_low) + math.sqrt(r_low**2 - (AXLE_Z - cz_low)**2)   # paroi courbe droite à la hauteur de l'axe
     z_sv0, z_sv1 = AXLE_Z - SV_SHAFT_OFF, AXLE_Z - SV_SHAFT_OFF + SV_L
-    servo_x = []   # (x_face_boss, direction vers l'intérieur, x cloison)
+    servo_x = []   # (x_face_boss, direction vers l'intérieur, x face d'appui des oreilles)
     # Les 2 servos sont collés à leur paroi (face de sortie = face interne de la paroi) ; les tubes-paliers sont EXTERNES.
+    #
+    # CORRECTION 10/09 — la cloison tombait PILE dans le volume des oreilles.
+    #   Les oreilles occupent, mesuré depuis la face de sortie, x_face + d·[4.1 ; 6.6]
+    #   (SV_H - SV_FLANGE_Z - SV_FLANGE_T = 4.1 et SV_H - SV_FLANGE_Z = 6.6).
+    #   L'ancien code posait la cloison sur x_face + d·[4.1 ; 6.6] : recouvrement 2.5 / 2.5 mm,
+    #   le servo butait sur elle avant d'être en place. En plus, la boîte 'bulk' n'était pas
+    #   limitée à la cavité : elle SORTAIT de la peau de la panse (bosse mesurée jusqu'à r = 50.3
+    #   pour une peau à r = 46, sous l'axe, z ≈ 30…34).
+    # Nouvelle implantation : cloison SOUDÉE à la paroi latérale, en AMONT des oreilles
+    #   -> x_face … x_face + d·4.1 (4.1 mm d'épaisseur), face d'appui des oreilles à x_bulk_in.
+    #   Les oreilles restent alors du côté CAVITÉ : les vis se vissent depuis l'intérieur, tête
+    #   accessible (avant, tête et tournevis tombaient dans l'espace mort de 4.1 mm côté paroi).
+    #   Et la boîte est INTERSECTÉE avec la cavité -> plus aucune bosse hors peau.
+    #   La boîte mord 0.6 mm DANS la paroi latérale (union franche, jamais coplanaire) et le clip
+    #   se fait sur le glyphe réduit de WALL-0.6 : la cloison s'arrête donc 1.8 mm sous la peau.
     for x_face, d in ((WALL, +1), (x_wall_R - WALL, -1)):
-        x_bulk_in = x_face + d*(SV_H - SV_FLANGE_Z)            # face de la cloison côté pattes
-        x_bulk_out = x_bulk_in - d*2.5
-        ajouts.append(boite('bulk', min(x_bulk_in, x_bulk_out), max(x_bulk_in, x_bulk_out), y_cav_b - 1, y_cav_f + 1, z_sv0 - 6.0, z_sv1 + 6.0))
+        x_bulk_in = x_face + d*(SV_H - SV_FLANGE_Z - SV_FLANGE_T)   # face d'appui des oreilles
+        x_bulk_out = x_face - d*0.6                                  # soudée à la paroi latérale
+        bulk = boite('bulk', min(x_bulk_in, x_bulk_out), max(x_bulk_in, x_bulk_out), y_cav_b - 1, y_cav_f + 1, z_sv0 - 6.0, z_sv1 + 6.0)
+        booleen(bulk, glyph_solids(y_cav_b - 3, y_cav_f + 3, inset=WALL - 0.6), 'INTERSECT')   # jamais hors de la peau
+        ajouts.append(bulk)
         servo_x.append((x_face, d, x_bulk_in))
     # ── Tubes-paliers EXTERNES (coaxiaux, z = AXLE_Z, y = 0), Ø BEAR_D + 2·BEAR_WALL. Le moyeu Ø24 × 13 de la roue tourne dedans.
     #    Côté panse : la panse déborde jusqu'à x=GW à z=66.8 → plan interne roue à x_in_R = GW + GAP.
@@ -329,7 +350,9 @@ def build_body():
     for tb in (tube_R, tube_L):
         booleen(env, tb, 'UNION')
     # ── Piédestal MPU6050 : DESSUS à z = AXLE_Z (axe de tangage = axe des roues), entre les 2 servos
-    MPU_X = 38.0
+    # MPU_X 38.0 -> 39.0 (10/09) : le piédestal commençait à x = 26.0 pour un servo spine dont le
+    # fond est à x = 24.9 -> 1.1 mm seulement, moins que le jeu de montage SV_CLR. À 39.0 : 2.1 mm.
+    MPU_X = 39.0
     ajouts.append(boite('mpu_ped', MPU_X - MPU_L/2 - 1.5, MPU_X + MPU_L/2 + 1.5, -MPU_W/2 - 1.5, MPU_W/2 + 1.5, LOW['zb'] + WALL - 1, AXLE_Z - MPU_T))
     # ── Berceau carte T-Display : 2 rails horizontaux (haut/bas de la dalle) où le PCB vient se clipser, écran vers +Y
     #    La carte (60.78 × 25.51) est en PAYSAGE : 60.78 selon X, 25.51 selon Z. Dalle affleure y = yf - COUNTER - 0.5.
@@ -341,9 +364,15 @@ def build_body():
     # Carte en paysage, USB-C vers le BAS (x = lcx - PCB_LEN/2) → trous à x = lcx - PCB_LEN/2 + 57.66, z = lcz ± 10.
     # Les plots sont ADOSSÉS au rail haut/bas (z) pour ne pas flotter.
     PCB_FIX_X = lcx - PCB_LEN/2 + 57.66
+    # CORRECTION 10/09 — ces plots traversaient TOUTE la cavité (y −20.6 → 17.3). Celui du bas
+    # (x 83.7…88.7, z 59.5…64.5) coupait donc le plan du servo panse : 0.6 mm seulement au-dessus
+    # du corps (z 58.9) et pile devant la sortie de câble. On les arrête à y = PCB_PLOT_Y0 = 8.0,
+    # au-delà de la largeur du servo (y ±6.1 + 1 de jeu = ±7.1). Ils restent tenus par la nervure
+    # 'pcbrib' (y 13.3…20) qui les relie au rail, lui-même soudé aux parois.
+    PCB_PLOT_Y0 = 8.0
     for sz in (-1, 1):
         zz = lcz + sz*PCB_FIX_PITCH/2
-        ajouts.append(cylindre('pcbplot', 5.0, (y_pcb - y_cav_b) + 1, 'Y', (PCB_FIX_X, (y_pcb + y_cav_b)/2, zz)))
+        ajouts.append(cylindre('pcbplot', 5.0, (y_pcb - PCB_PLOT_Y0) + 1, 'Y', (PCB_FIX_X, (y_pcb + PCB_PLOT_Y0)/2, zz)))
         # nervure qui relie le plot au rail voisin (rail bas z∈[lcz-PCB_WID/2-3, lcz-PCB_WID/2], rail haut symétrique)
         z_rail = lcz + sz*(PCB_WID/2 + 1.5)
         ajouts.append(boite('pcbrib', PCB_FIX_X - 2.0, PCB_FIX_X + 2.0, y_pcb - 4.0, y_cav_f + 1, min(zz, z_rail), max(zz, z_rail)))
@@ -389,14 +418,31 @@ def build_body():
     # ── Trou de passage du bossage servo (Ø 11.8 + jeu) à TRAVERS la paroi seulement, pour rejoindre l'alésage
     outils.append(cylindre('axR', SV_BOSS_D + 1.0, WALL + 0.6, 'X', (x_wall_R - WALL/2, 0.0, AXLE_Z)))  # de x_wall_R-WALL-0.3 (cavité) à x_wall_R+0.3 (tube) : traverse la paroi ENTIÈRE (valeur review Grok)
     outils.append(cylindre('axL', SV_BOSS_D + 1.0, 2.6 - (-0.4), 'X', ((2.6 + (-0.4))/2, 0.0, AXLE_Z)))
-    # ── Fenêtres servo dans les cloisons (SV_L × SV_W + jeu) + avant-trous Ø1.7 des pattes (entraxe 27.8 selon Z)
+    # ── Fenêtres servo dans les cloisons (SV_L × SV_W + SV_CLR par face) + avant-trous Ø1.7 des pattes
+    #    Le servo se pose LATÉRALEMENT (selon Y, par le plan de joint ouvert) : la fenêtre est une
+    #    RAINURE débouchant en y = 0, le corps y descend, les oreilles viennent porter sur x_bulk_in.
+    #    Jeu porté de SLIDING_FIT (0.15) à SV_CLR (1.0) par face : taquets de moulage + bavure de joint.
     for x_face, d, x_bulk_in in servo_x:
-        # fenêtre : de la face du servo (sans entamer la paroi extérieure) jusqu'au-delà de la cloison
-        x_lo = min(x_face, x_bulk_in + d*1.0); x_hi = max(x_face, x_bulk_in + d*1.0)
-        outils.append(boite('svwin', x_lo, x_hi, -SV_W/2 - SLIDING_FIT, SV_W/2 + SLIDING_FIT, z_sv0 - SLIDING_FIT, z_sv1 + SLIDING_FIT))
+        # Rainure du CORPS : sur TOUTE la profondeur du servo (x_face → x_face + d·SV_H), pas
+        # seulement jusqu'à la cloison. Côté panse la paroi courbe rentre jusqu'à x = 95.3 sous
+        # l'axe (z ≈ 35) : une rainure arrêtée à la cloison laissait 802 mm3 de matière dans le
+        # corps du servo. La cavité étant déjà vide partout ailleurs, ce surcreusement n'enlève
+        # de la matière QUE dans ce coin (relief déjà présent avant correction).
+        x_a, x_b = x_face, x_face + d*(SV_H + 0.6)
+        outils.append(boite('svwin', min(x_a, x_b), max(x_a, x_b), -SV_W/2 - SV_CLR, SV_W/2 + SV_CLR, z_sv0 - SV_CLR, z_sv1 + SV_CLR))
         z_mid = (z_sv0 + z_sv1)/2
+        # Logement des OREILLES : de la face d'appui (x_bulk_in) vers la cavité, sur l'envergure
+        # SV_TAB_SPAN. Sans lui, les bouts d'oreille tapaient dans la paroi courbe côté panse.
+        x_c = x_bulk_in + d*(SV_FLANGE_T + SV_CLR)
+        outils.append(boite('svear', min(x_bulk_in, x_c), max(x_bulk_in, x_c),
+                            -SV_W/2 - SV_CLR, SV_W/2 + SV_CLR,
+                            z_mid - SV_TAB_SPAN/2 - SV_CLR, z_mid + SV_TAB_SPAN/2 + SV_CLR))
+        # avant-trous des oreilles : BORGNES dans la cloison, percés depuis la CAVITÉ (x_bulk_in + d·1.0)
+        # vers la paroi, arrêtés 0.4 mm avant elle -> 3.7 mm de prise, jamais de débouché sur la peau.
+        # Vis : celles livrées avec le SG90 (autotaraudeuses ≈ Ø1.9 × 6.5) ou M2 × 6 — PAS M2 × 8.
+        x_pil0, x_pil1 = x_face + d*0.4, x_bulk_in + d*1.0
         for sz in (-1, 1):
-            outils.append(cylindre('svpil', SV_PILOT_D, 6.0, 'X', (x_bulk_in - d*2.0, 0.0, z_mid + sz*SV_HOLE_PITCH/2)))
+            outils.append(cylindre('svpil', SV_PILOT_D, abs(x_pil1 - x_pil0), 'X', ((x_pil0 + x_pil1)/2, 0.0, z_mid + sz*SV_HOLE_PITCH/2)))
     # ── Interrupteur à glissière 13 × 8 à l'arrière (spine, z ≈ 150)
     outils.append(boite('sw', SPINE_W/2 - 6.5, SPINE_W/2 + 6.5, -DEPTH/2 - 1, y_cav_b + 1, 160, 168))  # z 160-168 : au-dessus du plot screw spine (fin 149.3) → plus de lame non-manifold
     # ── Passe-fils entre panse basse et haute : ouverture dans la cloison à z = Z_MID
@@ -432,7 +478,13 @@ def split_body(env):
     def bowl_geo(b):
         r = (b['zt'] - b['zb'])/2; cz = (b['zt'] + b['zb'])/2; return r, b['xr'] - r, cz
     rL, cxL, czL = bowl_geo(LOW); rH, cxH, czH = bowl_geo(HIGH)
-    pins = [(SPINE_W/2, Z0 + 12), (SPINE_W/2, Z0 + GH - 12),            # dans la cavité du spine (13.2 large : plot Ø9 soudé aux 2 murs)
+    # CORRECTION 10/09 — le goujon bas du spine était à z = Z0+12 = 38, soit EN PLEIN MILIEU de la
+    # baie du servo spine (corps z 36.1…58.9, oreilles z 31.4…63.6) : son plot Ø9 (z 33.5…42.5,
+    # x 5.5…14.5) traversait le corps ET les oreilles du servo — c'est le « plot qui bloque ».
+    # Descendu à z = 20 : plot z 15.5…24.5, soit 5.9 mm sous l'oreille basse (z 31.4 − 1 de jeu),
+    # toujours dans la cavité du spine (x 2.4…17.6, plancher z 14.4) et soudé aux 2 parois Y.
+    # Bonus : l'écartement des 2 goujons passe de 141 à 159 mm (meilleur guidage des coques).
+    pins = [(SPINE_W/2, 20.0), (SPINE_W/2, Z0 + GH - 12),               # dans la cavité du spine (13.2 large : plot Ø9 soudé aux 2 murs)
             (cxL + rL - WALL - 4.0, czL), (cxH + rH - WALL - 4.0, czH)]  # adossés au mur courbe droit, à mi-hauteur
     screws = [(SPINE_W/2, Z0 + GH*0.30), (SPINE_W/2, Z0 + GH*0.72),
               (70.0, 33.0),  # LOW : cavité basse, loin des servos (x≤25 / x≥82) et du MPU (x≤50) — pilier tenu par les parois Y + vis M3

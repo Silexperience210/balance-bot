@@ -5,3 +5,13 @@ export/**/*.zip
 # Sorties Blender
 *.blend1
 chassis/v3/preview_*.png
+
+# Caches Python
+__pycache__/
+*.pyc
+
+# Sorties de rendu (artefacts)
+chassis/render/frames/
+chassis/render/ecran/
+chassis/render/*.mp4
+chassis/*.bak-*/

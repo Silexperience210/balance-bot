@@ -47,7 +47,9 @@ for side, x0, x1 in (("GAUCHE", -6, 14), ("DROIT", 104, 122)):
 for (x, z) in ((108.0, 75.5), (108.0, 144.8), (48.0, 33.0), (57.8, 184.6)):
     hits = sorted(float(p[1]) for p in ray(f, [x, -5, z], [0, 1, 0]))
     report("avant-trou M3 (%.1f,%.1f) vide 0.5-16.5" % (x, z), len(hits) == 4 and abs(hits[1] - 0.5) < 0.2 and abs(hits[2] - 16.5) < 0.2, "y=%s" % [round(h, 2) for h in hits])
-for (x, z) in ((108.0, 38.0), (108.0, 179.0), (6.4, 72.0), (18.2, 145.0)):
+# (108.0, 20.0) : goujon bas du spine, descendu de z=38 a z=20 le 10/09 — il tombait dans la baie
+# du servo spine (corps z 36.1-58.9, oreilles z 31.4-63.6). Voir gen_bitcoin_bot.py / split_body().
+for (x, z) in ((108.0, 20.0), (108.0, 179.0), (6.4, 72.0), (18.2, 145.0)):
     hits = sorted(float(p[1]) for p in ray(f, [x, -5, z], [0, 1, 0]))
     report("goujon Ø6 (%.1f,%.1f) vide jusqu'a 8.5" % (x, z), len(hits) >= 1 and abs(hits[0] - 8.5) < 0.4, "y=%s" % [round(h, 2) for h in hits])
 for (x, z) in ((77.4, 145.0), (51.4, 145.0)):
