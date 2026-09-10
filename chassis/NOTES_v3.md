@@ -25,7 +25,8 @@ se monte par l'ouverture avant vissage (4 goujons + 4 vis M3).
 5. Joint des coques : goujons Ø5.8 (b_back, x4) → alésages Ø6.0 (b_front, prof 6.8) ; vis M3 × 30
    tête noyée Ø6.4 (b_back) → passage Ø3.4 → avant-trou Ø2.6 dans les plots du front (autotaraudage).
    Plots de vis à 4 endroits : spine z≈71/142, mur courbe bas droite (45°), plafond panse haute (z≈184).
-6. Carte T-Display S3 : paysage, dalle dans la fenêtre 40.6 × 22.6 du contre-poinçon bas (lcz≈66.8),
+6. Carte T-Display S3 : paysage, dalle dans la fenêtre 56 × 26 du contre-poinçon bas (lcz≈72 ; demande
+   utilisateur du 10/09 : l'ouverture de 40,6 × 22,6 ne laissait pas passer la dalle + son encadrement) ;
    rails haut/bas + 2 vis M2 aux trous réels (x = lcx − 30.39 + 57.66, z = lcz ± 10) ; USB-C vers le bas
    (lumière sous le corps à z=19-23).
 7. MPU6050 : piédestal dont le DESSUS est à z = 36.5 (l'axe de tangage !) ; vis M2 entraxe 15 (Ø1.7).
