@@ -16,7 +16,7 @@ import os
 import sys
 
 import bpy
-from mathutils import Vector
+from mathutils import Quaternion, Vector
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 V3 = os.path.join(ROOT, "chassis", "v3")
@@ -26,11 +26,24 @@ os.makedirs(OUT, exist_ok=True)
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 MODE = argv[0] if argv else "still"
 
-# ── cotes du projet ───────────────────────────────────────────────────────
-Z_WHEEL, Y_WHEEL = 41.5, 12.8
-X_MID, TRACK = 64.57, 108.0
-Z_SCREEN, X_SCREEN = 72.0, 59.5
-Z_HEAD, X_HEAD, SR_PITCH = 145.0, 64.4, 26.0
+# ── cotes du projet — SOURCE : chassis/gen_bitcoin_bot.py ─────────────────
+# AXLE_Z = WHEEL_R = WHEEL_D/2 − GROOVE_D + TIRE_T = 40 − 0.5 + 2.5 = 42.0
+AXLE_Z = 42.0
+X_MID = 64.57          # centre de l'enveloppe du corps (mesuré sur b_front)
+Y_AXLE = 0.0           # l'axe des roues est dans le plan de joint (y = 0)
+# Roues : origine = FACE EXTERNE du disque imprimé (cf. assemblage_pour_rendu) ; le
+# moyeu (13 mm) part vers l'intérieur, son bout tombe sur le plan de la paroi
+# (xL = GW − x_wall_R + 1 = 12.13 ; xR = GW − 1 = 117.0).
+# « D » = côté paroi courbe (x≈11) ; « G » = côté spine (x≈118).
+ROUE = {"D": (-8.87, +1), "G": (138.00, -1)}       # (x origine, sens du moyeu)
+PNEU = {"D": -8.37, "G": 137.50}                   # origine de la bande TPU
+SERVO = {"D": 24.93, "G": 104.35}                  # x du centre du corps de servo
+SERVO_BRIDE = {"D": 13.53, "G": 115.60}            # x de la platine (côté sortie)
+SERVO_Z = 47.50                # corps z∈[36.1, 58.9] → arbre à 42 (= axe)
+X_SCREEN, Z_SCREEN = 58.5, 72.0    # counter_center(LOW) → miroir : 118 − 59.5
+X_HEAD, Z_HEAD, SR_PITCH = 64.4, 145.0, 26.0       # counter_center(HIGH) miroir
+MPU_CENTRE = (80.0, 0.0, 41.0)     # GW − MPU_X = 80 ; dessus du piédestal à z=42
+Z_WHEEL, Y_WHEEL = AXLE_Z, Y_AXLE  # alias (noms historiques)
 FPS = 30
 F_ORBITE_END, F_ECLATE_END, F_REMONTE_END, F_FIN = 240, 420, 570, 780
 
@@ -108,63 +121,61 @@ def importer(nom, fichier, mat):
 supprimer_tout()
 
 # ══════════════════════════════════════════════════════════════════════════
-# ensemble mécanique — positions assemblées (A) et éclatées (E)
+# ensemble mécanique — placement aux cotes EXACTES du générateur de châssis
 # ══════════════════════════════════════════════════════════════════════════
-PIVOT = (X_MID, Y_WHEEL, Z_WHEEL)
+PIVOT = (X_MID, Y_AXLE, AXLE_Z)          # axe d'équilibrage = axe des roues
 
-# corps = tout sauf les roues, parenté à un pivot placé sur l'axe des roues
 corps = []
 front = importer("b_front", os.path.join(V3, "b_front.stl"), M_ORANGE)
 back = importer("b_back", os.path.join(V3, "b_back.stl"), M_ORANGE_FONCE)
 corps += [front, back]
 
+# T-Display S3 : PCB 62 × 26 dans sa poche, dalle dans la fenêtre 56 × 26 (lcz = 72)
 carte = boite("carte", (62.0, 1.2, 26.0), (X_SCREEN, 18.0, Z_SCREEN), M_NOIR)
 ecran = boite("ecran", (56.0, 0.5, 26.0), (X_SCREEN, 19.2, Z_SCREEN), M_ECRAN)
-# yeux : deux amandes émissives sur l'écran
+# yeux : deux amandes émissives devant la dalle (le visage du firmware)
 yeux = []
 for sx in (-1, 1):
     bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24, radius=1.0,
-                                        location=(X_SCREEN + sx * 12.0, 19.6, Z_SCREEN + 1.0))
+                                        location=(X_SCREEN + sx * 12.0, 19.9, Z_SCREEN + 1.0))
     o = bpy.context.object
     o.name = f"oeil_{'G' if sx > 0 else 'D'}"
     o.scale = (9.0, 4.0, 5.0)
     habiller(o, M_YEUX)
     yeux.append(o)
 
-mpu = boite("mpu", (21.0, 16.0, 3.0), (X_SCREEN - 6.0, 10.0, 38.0), M_SERVO)
-hc = boite("hc_sr04", (45.0, 1.6, 20.0), (X_HEAD, 23.0, Z_HEAD), M_NOIR)
+# MPU6050 : piédestal dont le dessus est à z = 42 (l'axe de tangage), centré en y = 0
+mpu = boite("mpu", (21.0, 16.0, 2.0), MPU_CENTRE, M_SERVO)
+# HC-SR04 : PCB 45 × 20 debout derrière les 2 trous Ø16,6 (entraxe 26) de la baie haute
+hc = boite("hc_sr04", (45.0, 1.6, 20.0), (X_HEAD, 12.0, Z_HEAD), M_NOIR)
 transducteurs = []
 for sx in (-1, 1):
-    transducteurs.append(cylindre(f"transducteur_{'D' if sx < 0 else 'G'}", 8.0, 12.0,
+    transducteurs.append(cylindre(f"transducteur_{'D' if sx < 0 else 'G'}", 8.3, 12.0,
                                   (X_HEAD + sx * SR_PITCH / 2, 17.6, Z_HEAD), M_ORANGE, "Y"))
 corps += [carte, ecran, mpu, hc] + transducteurs + yeux
 
-servos_pied = []
-for cote, sx in (("D", -1), ("G", 1)):
-    socle = X_MID + sx * (TRACK / 2 - 13.0 - 1.5)
-    servos_pied.append(boite(f"servo_pied_{cote}", (22.5, 12.2, 22.8),
-                             (socle - sx * 11.25, Y_WHEEL, Z_WHEEL), M_SERVO))
-    servos_pied.append(boite(f"servo_pied_{cote}_bride", (2.5, 22.8, 32.2),
-                             (socle, Y_WHEEL, Z_WHEEL), M_SERVO))
-corps += servos_pied
+# 2 servos de roue (le design n'en comporte aucun autre) : couchés, axe selon X,
+# corps dans la cavité (z 36,1 → 58,9 ; arbre à 42), sortie au travers de la paroi.
+servos = []
+for cote in ("D", "G"):
+    servos.append(boite(f"servo_pied_{cote}", (22.5, 12.2, 22.8),
+                        (SERVO[cote], Y_AXLE, SERVO_Z), M_SERVO))
+    servos.append(boite(f"servo_pied_{cote}_bride", (2.5, 12.2, 32.2),
+                        (SERVO_BRIDE[cote], Y_AXLE, SERVO_Z), M_SERVO))
+corps += servos
 
-for i, sx in enumerate((-1, 1)):
-    corps.append(boite(f"servo_tete_{i}", (12.2, 22.8, 22.5),
-                       (X_HEAD + sx * 14.0, 2.0, Z_HEAD + 22.0), M_SERVO))
-
-batterie = boite("batterie", (60.0, 18.0, 26.0), (X_MID, -12.0, 70.0), M_NOIR)
-corps.append(batterie)
-
-# roues (hors corps : elles tournent)
+# roues et bandes TPU — positions du générateur ; elles tournent autour de l'axe X
 roues, pneus = [], []
-for cote, sx in (("D", -1), ("G", 1)):
-    x = X_MID + sx * (TRACK / 2)
+for cote in ("D", "G"):
+    x, sens = ROUE[cote]
     r = importer(f"roue_{cote}", os.path.join(V3, "coin_wheel.stl"), M_NOIR)
-    r.rotation_euler = (0, math.pi / 2, 0)
-    r.location = (x, Y_WHEEL, Z_WHEEL)
+    r.rotation_mode = "QUATERNION"
+    r.rotation_quaternion = Quaternion((0, 1, 0), sens * math.pi / 2)
+    r.location = (x, Y_AXLE, AXLE_Z)
     p = importer(f"pneu_{cote}", os.path.join(V3, "coin_tire.stl"), M_CAOUT)
-    p.rotation_euler = (0, math.pi / 2, 0)
-    p.location = (x + sx * 4.5, Y_WHEEL, Z_WHEEL)
+    p.rotation_mode = "QUATERNION"
+    p.rotation_quaternion = Quaternion((0, 1, 0), sens * math.pi / 2)
+    p.location = (PNEU[cote], Y_AXLE, AXLE_Z)
     roues.append(r)
     pneus.append(p)
 
@@ -186,15 +197,12 @@ ECLATE = {
     "hc_sr04": Vector((0, 52, 0)),
     "transducteur_D": Vector((0, 66, 0)),
     "transducteur_G": Vector((0, 66, 0)),
-    "batterie": Vector((0, -46, 0)),
     "oeil_G": Vector((0, 74, 0)),
     "oeil_D": Vector((0, 74, 0)),
-    "servo_pied_D": Vector((-42, 22, 0)),
-    "servo_pied_D_bride": Vector((-30, 22, 0)),
-    "servo_pied_G": Vector((42, 22, 0)),
-    "servo_pied_G_bride": Vector((30, 22, 0)),
-    "servo_tete_0": Vector((0, 58, 26)),
-    "servo_tete_1": Vector((0, 58, 26)),
+    "servo_pied_D": Vector((-34, 22, 0)),
+    "servo_pied_D_bride": Vector((-24, 22, 0)),
+    "servo_pied_G": Vector((34, 22, 0)),
+    "servo_pied_G_bride": Vector((24, 22, 0)),
     "roue_D": Vector((-58, 0, 0)),
     "roue_G": Vector((58, 0, 0)),
     "pneu_D": Vector((-92, 0, 0)),
@@ -301,7 +309,7 @@ def placer_camera(angle_deg, distance, hauteur, cible_hauteur=104):
 # ══════════════════════════════════════════════════════════════════════════
 if MODE == "still":
     configurer_moteur()
-    scene.cycles.samples = 256
+    scene.cycles.samples = 128
     scene.render.resolution_x = 2560
     scene.render.resolution_y = 1440
     placer_camera(0.0, 800, 120, 104)
@@ -347,22 +355,20 @@ for nom, obj in pieces.items():
         obj.keyframe_insert("location", frame=f)
 
 # phase D : le robot fonctionne
-# roues qui tournent
-for r in roues:
-    base = r.rotation_euler.copy()
+# roues qui tournent autour de l'axe X (quaternions : la base oriente la roue,
+# la rotation d'avant appliquée à gauche fait tourner autour de l'axe des roues)
+for r, cote in ((roues[0], "D"), (roues[1], "G"), (pneus[0], "D"), (pneus[1], "G")):
+    sens = ROUE[cote][1]
+    base = Quaternion((0, 1, 0), sens * math.pi / 2)
     for f, tours in ((F_REMONTE_END, 0.0), (F_REMONTE_END + 90, 1.0), (F_FIN, 3.2)):
-        r.rotation_euler = (base[0] + tours * 2 * math.pi, base[1], base[2])
-        r.keyframe_insert("rotation_euler", frame=f)
+        r.rotation_quaternion = Quaternion((1, 0, 0), tours * 2 * math.pi) @ base
+        r.keyframe_insert("rotation_quaternion", frame=f)
 # équilibrage : le corps tangue doucement autour de l'axe des roues
 for f, deg in ((F_REMONTE_END, 0), (F_REMONTE_END + 45, 3.2), (F_REMONTE_END + 90, -3.0),
                (F_REMONTE_END + 135, 2.2), (F_FIN, 0.0)):
     pivot.rotation_euler = (math.radians(deg), 0, 0)
     pivot.keyframe_insert("rotation_euler", frame=f)
-# tête qui balaie
-for o in (hc, transducteurs[0], transducteurs[1]):
-    for f, deg in ((F_REMONTE_END, 0), (F_REMONTE_END + 60, 11), (F_REMONTE_END + 120, -11), (F_FIN, 0)):
-        o.rotation_euler = (0, 0, math.radians(deg))
-        o.keyframe_insert("rotation_euler", frame=f)
+# (pas de balayage de tête : le châssis ne comporte que les 2 servos de roue)
 # clignement des yeux
 for o in yeux:
     base = o.scale.copy()
