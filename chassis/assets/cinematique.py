@@ -6,8 +6,10 @@ Deux modes :
     blender -b -P cinematique.py -- cine      → vidéo : orbite → éclaté → remontage → en marche
 
 Réutilise le placement de chassis/assets/vue_eclatee.py (cotes réelles du projet).
-Matériaux : orange métallisé (coques), noir métallisé (roues/pneus), écran émissif
-avec des yeux animés, sol noir brillant.
+Matériaux : orange métallisé (coques), noir métallisé (roues/pneus), aluminium
+(transducteurs HC-SR04), sol noir brillant. L'écran du LilyGo est ÉMISSIF et
+ANIMÉ : chassis/assets/ecran_firmware.py génère une séquence 320×170 fidèle au
+firmware (écran de commande manuel, puis le visage en auto-équilibre).
 
 Sorties : chassis/render/hero_face.png  et  chassis/render/cinematique.mp4
 """
@@ -25,6 +27,8 @@ os.makedirs(OUT, exist_ok=True)
 
 argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 MODE = argv[0] if argv else "still"
+# plage d'images optionnelle pour les essais : `-- cine 560 566`
+DEB, FIN = (int(argv[1]), int(argv[2])) if len(argv) >= 3 and argv[1].isdigit() else (1, None)
 
 # ── cotes du projet — SOURCE : chassis/gen_bitcoin_bot.py ─────────────────
 # AXLE_Z = WHEEL_R = WHEEL_D/2 − GROOVE_D + TIRE_T = 40 − 0.5 + 2.5 = 42.0
@@ -72,6 +76,31 @@ M_ECRAN = metal("ecran", (0.01, 0.01, 0.012), 0.15, metallic=0.4,
 M_YEUX = metal("yeux", (0.02, 0.02, 0.02), 0.2, metallic=0.0, emission=(1.0, 0.42, 0.05), force=14.0)
 M_VIS = metal("vis", (0.62, 0.63, 0.66), 0.25)
 M_SERVO = metal("servo", (0.06, 0.06, 0.07), 0.4, metallic=0.8)
+# HC-SR04 réel : culs de transducteurs en aluminium, grille sombre en façade
+M_ALU = metal("aluminium_transducteur", (0.72, 0.73, 0.76), 0.30)
+M_GRILLE = metal("grille_transducteur", (0.055, 0.055, 0.06), 0.55, metallic=0.7)
+
+
+def materialiser_ecran(fichier_sequence):
+    """Dalle ST7789 320×170 dont l'ÉMISSION est une séquence d'images : c'est
+    l'écran réel du firmware (écran de commande → visage en auto)."""
+    m = bpy.data.materials.new("ecran_anime")
+    m.use_nodes = True
+    nt = m.node_tree
+    bsdf = nt.nodes["Principled BSDF"]
+    bsdf.inputs["Base Color"].default_value = (0.01, 0.01, 0.012, 1.0)
+    bsdf.inputs["Roughness"].default_value = 0.18
+    bsdf.inputs["Emission Strength"].default_value = 0.9
+    img = bpy.data.images.load(fichier_sequence)
+    img.source = "SEQUENCE"
+    tex = nt.nodes.new("ShaderNodeTexImage")
+    tex.image = img
+    tex.extension = "CLIP"
+    tex.image_user.use_auto_refresh = True
+    tex.image_user.frame_start = 1
+    tex.image_user.frame_duration = 780
+    nt.links.new(tex.outputs["Color"], bsdf.inputs["Emission Color"])
+    return m
 
 
 def supprimer_tout():
@@ -130,19 +159,12 @@ front = importer("b_front", os.path.join(V3, "b_front.stl"), M_ORANGE)
 back = importer("b_back", os.path.join(V3, "b_back.stl"), M_ORANGE_FONCE)
 corps += [front, back]
 
-# T-Display S3 : PCB 62 × 26 dans sa poche, dalle dans la fenêtre 56 × 26 (lcz = 72)
+# T-Display S3 : PCB 62 × 26 dans sa poche, dalle 1,9" 320×170 devant la fenêtre
+# (zone active 40,8 × 21,7 mm). L'écran est ANIMÉ : une séquence d'images
+# reproduit le firmware — écran de commande, puis le visage en auto-équilibre.
 carte = boite("carte", (62.0, 1.2, 26.0), (X_SCREEN, 18.0, Z_SCREEN), M_NOIR)
-ecran = boite("ecran", (56.0, 0.5, 26.0), (X_SCREEN, 19.2, Z_SCREEN), M_ECRAN)
-# yeux : deux amandes émissives devant la dalle (le visage du firmware)
-yeux = []
-for sx in (-1, 1):
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24, radius=1.0,
-                                        location=(X_SCREEN + sx * 12.0, 19.9, Z_SCREEN + 1.0))
-    o = bpy.context.object
-    o.name = f"oeil_{'G' if sx > 0 else 'D'}"
-    o.scale = (9.0, 4.0, 5.0)
-    habiller(o, M_YEUX)
-    yeux.append(o)
+ecran = boite("ecran", (40.8, 0.5, 21.7), (X_SCREEN, 19.6, Z_SCREEN),
+              materialiser_ecran(os.path.join(OUT, "ecran", "ecran_0001.png")))
 
 # MPU6050 : piédestal dont le dessus est à z = 42 (l'axe de tangage), centré en y = 0
 mpu = boite("mpu", (21.0, 16.0, 2.0), MPU_CENTRE, M_SERVO)
@@ -150,9 +172,14 @@ mpu = boite("mpu", (21.0, 16.0, 2.0), MPU_CENTRE, M_SERVO)
 hc = boite("hc_sr04", (45.0, 1.6, 20.0), (X_HEAD, 12.0, Z_HEAD), M_NOIR)
 transducteurs = []
 for sx in (-1, 1):
-    transducteurs.append(cylindre(f"transducteur_{'D' if sx < 0 else 'G'}", 8.3, 12.0,
-                                  (X_HEAD + sx * SR_PITCH / 2, 17.6, Z_HEAD), M_ORANGE, "Y"))
-corps += [carte, ecran, mpu, hc] + transducteurs + yeux
+    cote = "D" if sx < 0 else "G"
+    x = X_HEAD + sx * SR_PITCH / 2
+    # culot aluminium (Ø16, comme le vrai composant) + grille sombre en façade
+    transducteurs.append(cylindre(f"transducteur_{cote}", 8.0, 10.0,
+                                  (x, 18.0, Z_HEAD), M_ALU, "Y"))
+    transducteurs.append(cylindre(f"cage_{cote}", 6.5, 0.6,
+                                  (x, 23.1, Z_HEAD), M_GRILLE, "Y"))
+corps += [carte, ecran, mpu, hc] + transducteurs
 
 # 2 servos de roue (le design n'en comporte aucun autre) : couchés, axe selon X,
 # corps dans la cavité (z 36,1 → 58,9 ; arbre à 42), sortie au travers de la paroi.
@@ -197,8 +224,8 @@ ECLATE = {
     "hc_sr04": Vector((0, 52, 0)),
     "transducteur_D": Vector((0, 66, 0)),
     "transducteur_G": Vector((0, 66, 0)),
-    "oeil_G": Vector((0, 74, 0)),
-    "oeil_D": Vector((0, 74, 0)),
+    "cage_D": Vector((0, 72, 0)),
+    "cage_G": Vector((0, 72, 0)),
     "servo_pied_D": Vector((-34, 22, 0)),
     "servo_pied_D_bride": Vector((-24, 22, 0)),
     "servo_pied_G": Vector((34, 22, 0)),
@@ -286,7 +313,10 @@ def configurer_moteur():
     else:
         print(f"[GPU] rendu sur {choisi}")
     scene.cycles.samples = 32
-    scene.render.use_persistent_data = True     # réutilise la scène entre les images
+    # PAS de use_persistent_data : avec des objets animés, Cycles reconstruit de
+    # toute façon et la donnée persistante le fait s'effondrer (5 min/image au
+    # lieu de 2 s). Mesuré : image fixe 2560×1440 @128 éch. = 20 s sans lui.
+    scene.render.use_persistent_data = False
     scene.render.resolution_x = 1280
     scene.render.resolution_y = 720
     scene.cycles.use_denoising = True
@@ -328,8 +358,8 @@ FRAMES = os.path.join(OUT, "frames")
 os.makedirs(FRAMES, exist_ok=True)
 scene.render.image_settings.file_format = "PNG"
 scene.render.filepath = os.path.join(FRAMES, "f_")
-scene.frame_start = 1
-scene.frame_end = F_FIN
+scene.frame_start = DEB
+scene.frame_end = FIN or F_FIN
 
 # orbite : tour complet lent pendant la phase A
 for f, angle in ((1, -30), (F_ORBITE_END, 250)):
@@ -369,13 +399,8 @@ for f, deg in ((F_REMONTE_END, 0), (F_REMONTE_END + 45, 3.2), (F_REMONTE_END + 9
     pivot.rotation_euler = (math.radians(deg), 0, 0)
     pivot.keyframe_insert("rotation_euler", frame=f)
 # (pas de balayage de tête : le châssis ne comporte que les 2 servos de roue)
-# clignement des yeux
-for o in yeux:
-    base = o.scale.copy()
-    for f, k in ((F_REMONTE_END, 1.0), (F_REMONTE_END + 40, 1.0), (F_REMONTE_END + 44, 0.12),
-                 (F_REMONTE_END + 48, 1.0), (F_FIN - 30, 1.0), (F_FIN - 26, 0.12), (F_FIN - 22, 1.0)):
-        o.scale = (base[0], base[1], base[2] * k)
-        o.keyframe_insert("scale", frame=f)
+# (clignements et expressions : ils sont DANS la texture de l'écran — le
+#  firmware dessine le visage, on affiche le firmware)
 
 # (Interpolation : laissée à Bézier/EASE AUTO, le défaut de Blender. Le réglage
 #  explicite `action.fcurves` a été retiré par Blender 5 — API « slots ».)
