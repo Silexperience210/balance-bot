@@ -394,8 +394,9 @@ CAM_KEYS = (
     (70,    0.0,  115,  72,  72),     # on tient le plan
     (150,   0.0,  620, 118, 104),     # recul : robot entier, de face
     (240,  62.0,  800, 130, 104),     # orbite → LATÉRAL-AVANT (~62°)
-    (420,  74.0, 1120, 175, 104),     # ÉCLATÉ vu de côté (~74°) : pièces étalées
-    (570,  74.0,  920, 140, 104),     # remontage, même angle
+    (420,  74.0,  780, 150, 104),     # ÉCLATÉ vu de côté, CAMÉRA PROCHE : les
+                                      # pièces écartées restent grandes à l'image
+    (570,  74.0,  820, 140, 104),     # remontage, même angle
     (650,  30.0,  820, 118, 100),     # retour vers la face
     (700,   8.0,  430, 100,  90),     # on se rapproche du visage
     (780,   0.0,  200,  84,  76),     # gros plan final : les YEUX lisibles
@@ -405,6 +406,20 @@ for f, angle, dist, haut, cible in CAM_KEYS:
     orbite.keyframe_insert("rotation_euler", frame=f)
     placer_camera(0.0, dist, haut, cible)
     cam.keyframe_insert("location", frame=f)
+
+# éclairage RENFORCÉ pendant l'éclaté : les pièces s'écartent et chacune se
+# retrouve isolée dans un studio sombre. Les matériaux étant métalliques (ils ne
+# font que RÉFLÉCHIR), elles devenaient noires sur fond noir — mesuré : 1,5 % de
+# l'image seulement était lumineux à l'image 420, alors que les pièces y sont
+# toutes (projection : 17,6 %). D'où le boost, relâché au remontage.
+for _nom in ("cle_orange", "contre_blanc", "rasante_chaude", "dessus_froid"):
+    _ob = bpy.data.objects.get(_nom)
+    if _ob is None:
+        continue
+    _e0 = _ob.data.energy
+    for _f, _k in ((F_ORBITE_END, 1.0), (F_ECLATE_END, 2.6), (F_REMONTE_END, 1.0)):
+        _ob.data.energy = _e0 * _k
+        _ob.data.keyframe_insert("energy", frame=_f)
 
 # éclatement / remontage de chaque pièce
 pieces = {o.name: o for o in bpy.data.objects if o.type == "MESH" and o.name in ECLATE}
