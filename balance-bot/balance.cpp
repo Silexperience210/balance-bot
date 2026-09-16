@@ -58,7 +58,9 @@ namespace {
 // Balance::setGains(). Des float 32 bits sur ESP32 : lecture/écriture
 // atomiques (un seul mot machine), pas de tearing possible entre la
 // boucle d'équilibre et le serveur web — ni volatile ni mutex requis.
-// Les valeurs ci-dessous restent les valeurs validées en simulation.
+// Les valeurs ci-dessous sont des gains de DÉPART, NON validés : le simulateur
+// corrigé (roulement exact + cascade) ne tient AUCUN scénario avec eux — voir
+// FIRMWARE_REVIEW.md §1bis. À régler sur le robot réel via le banc web.
 float kKp = 25.0f;   // vitesse par degré d'erreur
 float kKi = 500.0f;  // vitesse par (degré · seconde) — cf. Ki > g/R
 float kKd = 0.5f;    // vitesse par (degré / seconde) — sur le gyro

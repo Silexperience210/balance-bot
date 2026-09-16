@@ -132,7 +132,7 @@ class Sim:
             self.phi += dphi * DT
             cos_t = math.cos(self.theta)
             thdd = ((G / H) * math.sin(self.theta) - (R * dphidd / H) * cos_t) / (1.0 + (R / H) * cos_t)
-            if push_t and abs(t - push_t) < 0.02:
+            if push_t and abs(t - push_t) < DT / 2:
                 self.dtheta += push_v
             self.dtheta += thdd * DT
             self.theta += self.dtheta * DT

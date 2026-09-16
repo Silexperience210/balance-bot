@@ -508,7 +508,6 @@ FaceFrame faceCompute() {
 // État du visage (blinks, clin d'œil de récupération, preview web)
 unsigned long s_nextBlink = 0, s_blinkUntil = 0, s_winkUntil = 0, s_winkCooldown = 0;
 bool          s_wasFallen = false;
-FaceFrame     s_lastFrame;
 // Aperçu web : écrit depuis la tâche du banc (cœur 0), lu par la boucle
 // (cœur 1) → volatile, et s_faceForced publié EN DERNIER.
 volatile bool          s_faceForced  = false;

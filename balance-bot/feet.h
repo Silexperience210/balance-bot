@@ -2,7 +2,7 @@
 // ═══════════════════════════════════════════════════════════════════
 // BalanceBot — module A (équilibre) · en-tête PRIVÉ des pieds en arc
 //
-// Remplace wheels.h : la mécanique v2 n'a plus de roues. Deux arcs de
+// Remplace wheels.h : la mécanique v3.1 n'a plus de roues. Deux arcs de
 // cercle (foot_arc.stl, rayon 32.5 mm) entraînés par des servos taille
 // SG90 roulent sur le sol.
 //

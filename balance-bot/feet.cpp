@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════
 // BalanceBot — module A · pieds en arc (SG90 position OU servo continu)
 //
-// Mécanique (chassis/FIT_NOTES.md §9) : plus de roues. Chaque pied est
+// Mécanique (chassis/NOTES_v3.md) : plus de roues. Chaque pied est
 // un arc de cercle de rayon R = 32.5 mm, ouverture 200°, vissé sur le
 // palonnier du servo. L'arc ROULE sur le sol : quand le servo tourne de
 // φ, le robot se déplace de R·φ (32.5 mm par radian, soit 0.567 mm par
@@ -10,7 +10,7 @@
 // NEUTRE MÉCANIQUE — décision documentée :
 //   servo à 90° (kServoNeutralDeg) = milieu de l'arc vers le bas =
 //   point de contact exactement sous l'axe = robot vertical.
-//   C'est la position d'assemblage imposée par FIT_NOTES §9. On pose
+//   C'est la position d'assemblage imposée par NOTES_v3.md. On pose
 //   donc « angle de pied = 0 » ⇔ « servo = 90° », et l'angle de repos
 //   du robot droit vaut 0.0°.
 //
