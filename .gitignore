@@ -15,3 +15,11 @@ chassis/render/frames/
 chassis/render/ecran/
 chassis/render/*.mp4
 chassis/*.bak-*/
+
+# Simulateur mono-fichier généré : l'exemplaire publié vit à la racine
+# (simulateur.html, servi par GitHub Pages). La copie de travail est régénérable
+# par chassis/assets/emballer_simulateur.py.
+sim/web/simulateur-balancebot.html
+
+# Sauvegardes d'export
+export/*.bak-*/
