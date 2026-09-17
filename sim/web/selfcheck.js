@@ -166,7 +166,7 @@
   us.setActif(true);
   us.tickMany(201, 50, true);   // 1 s + 1 pas : la mesure d'échéance réussit
   check(us.state.cadenceMs === 200 && us.state.failStreak === 0 && us.state.obstacleCm === 50,
-        "écho de retour → cadence 200 ms immédiate, moyenne re-amorcée à 50");
+        "écho de retour → cadence 200 ms immédiate, moyenne amorcée à 50 (premier écho reçu)");
 
   // Un timeout n'empoisonne pas la moyenne : 40 cm (amorce), timeouts,
   // puis 60 cm → moy = 40 + (60 − 40)/5 = 44 à la mesure suivante.
@@ -179,16 +179,23 @@
   check(near(us.state.obstacleCm, 44, 1e-12),
         "timeout non injecté : moyenne reprise en l'état (" + us.state.obstacleCm.toFixed(2) + " = 40 + (60−40)/5)");
 
-  // Portée utile : 160 cm → écho reçu (9280 ≤ 9500 µs) mais lissée > 150 cm
-  // → « hors portée » SANS compter un échec ; 170 cm → timeout (échec).
+  // Portée utile : le budget pulseIn (9500 µs) couvre AUSSI l'attente du
+  // front montant d'ECHO (~480 µs, wiring_pulse.c du core ESP32) — le seuil
+  // réel est ≈ 155 cm, pas 163,8. 155 cm → écho reçu (155×58+480 = 9470 ≤
+  // 9500 µs) mais lissée > 150 cm → « hors portée » SANS compter un échec ;
+  // 156 cm (9528 > 9500 µs) et 170 cm → timeout (échec).
   us = U.create();
-  us.tickMany(40, 160, true);
+  us.tickMany(40, 155, true);
   check(us.state.obstacleCm === -1 && us.state.failStreak === 0,
-        "160 cm : écho reçu mais hors portée (obstacleCm = −1, pas d'échec)");
+        "155 cm : écho reçu mais hors portée (obstacleCm = −1, pas d'échec)");
+  us = U.create();
+  us.tickMany(40, 156, true);
+  check(us.state.obstacleCm === -1 && us.state.failStreak === 1,
+        "156 cm : au-delà du seuil réel (9528 > 9500 µs) → échec compté");
   us = U.create();
   us.tickMany(40, 170, true);
   check(us.state.obstacleCm === -1 && us.state.failStreak === 1,
-        "170 cm : au-delà du timeout pulseIn (9860 > 9500 µs) → échec compté");
+        "170 cm : au-delà du timeout pulseIn (10340 > 9500 µs) → échec compté");
 
   // Alerte < US_STOP_CM : warn + angle où l'obstacle a été vu (tête centrée
   // en équilibre → pan 90°).
@@ -203,13 +210,36 @@
   // Tête : hors équilibre elle balaye (bornée 0…180° / 20…90°) ; en équilibre
   // elle est ramenée au centre (90°/60°) à vitesse bornée 30°/s.
   us = U.create();
-  var mn = 999, mx = -999;
+  var mn = 999, mx = -999, mnT = 999, mxT = -999;
   for (i = 0; i < 4000; i++) {          // 20 s de balayage (robot au sol)
     us.tick(80, false);
     mn = Math.min(mn, us.state.headPanDeg); mx = Math.max(mx, us.state.headPanDeg);
+    mnT = Math.min(mnT, us.state.headTiltDeg); mxT = Math.max(mxT, us.state.headTiltDeg);
   }
   check(mn === 0 && mx === 180,
         "balayage hors équilibre : pan borné à 0…180° (vu " + mn + "…" + mx + ")");
+  check(mnT === 20 && mxT === 90,
+        "balayage hors équilibre : tilt borné à 20…90° (vu " + mnT + "…" + mxT + ")");
+
+  // Vitesse de balayage réelle = 30°/s (head.cpp l.38-39) : depuis le centre,
+  // 1 s au sol → pan 90 + 30 = 120 ; 0,5 s au sol → tilt 60 + 15 = 75.
+  us = U.create();
+  us.tickMany(200, 80, false);
+  check(us.state.headPanDeg === 120,
+        "vitesse de pan 30°/s : 90 → " + us.state.headPanDeg + "° après 1 s de balayage (attendu 120)");
+  us = U.create();
+  us.tickMany(100, 80, false);
+  check(us.state.headTiltDeg === 75,
+        "vitesse de tilt 30°/s : 60 → " + us.state.headTiltDeg + "° après 0,5 s de balayage (attendu 75)");
+
+  // Angle vu à un pan ≠ 90° : l'alerte survient PENDANT le balayage →
+  // l'angle capturé est le pan courant (96° au 1er tic de mesure, t = 200
+  // ms), pas le centre 90°.
+  us = U.create();
+  us.tickMany(200, 20, false);
+  check(us.state.obstacleWarn === true && us.state.angleVu === 96,
+        "alerte pendant le balayage : angle vu = pan courant (" + us.state.angleVu + "°, ≠ 90°)");
+
   for (i = 0; i < 600; i++) us.tick(80, true);   // 3 s d'équilibre
   check(us.state.headPanDeg === 90 && us.state.headTiltDeg === 60,
         "équilibre : tête ramenée au centre (90°/60°) et immobile");

@@ -414,11 +414,13 @@
   scene.add(robot);
 
   // ======================================================================
-  // Capteurs HC-SR04 (les « yeux » du robot réel, voir docs/photos/
-  // robot-reel.jpg) : pièces ACHETÉES, pas de STL → modélisation Three.js.
+  // Capteur HC-SR04 (les « yeux » du robot réel, voir docs/photos/
+  // robot-reel.jpg) : pièce ACHETÉE, pas de STL → modélisation Three.js.
   // Module réel ≈ 45 × 20 × 15 mm, deux transducteurs cylindriques Ø16 mm.
-  // Deux modules sur la face avant, partie haute, symétriques en Z.
-  // Solidaires de groupeCorps : ils tangue(nt) avec θ comme le corps.
+  // UN SEUL module sur le robot réel (config.h:61-62 : un TRIG, un ECHO) :
+  // sur la photo il est centré dans le lobe haut du ₿, au-dessus de
+  // l'écran, et ce sont ses deux transducteurs qui font les « yeux ».
+  // Solidaire de groupeCorps : il tangue avec θ comme le corps.
   // ======================================================================
   var matPCB = new THREE.MeshStandardMaterial({
     color: 0x14508c, metalness: 0.2, roughness: 0.6     // sérigraphie bleue HC-SR04
@@ -454,23 +456,25 @@
   }
 
   // Position sur la face avant (repère viewer, m) : la coque avant s'étend
-  // jusqu'à x = 23 mm (parts.js, b_front) ; partie haute du ₿, au-dessus de
-  // l'écran (y = +30,5 mm) — les yeux de la photo réelle.
-  var US_Y = 0.098, US_Z = 0.026, US_X = 0.023;
-  var moduleG = moduleHCSR04(); moduleG.position.set(US_X, US_Y, +US_Z);
-  var moduleD = moduleHCSR04(); moduleD.position.set(US_X, US_Y, -US_Z);
-  groupeCorps.add(moduleG);
-  groupeCorps.add(moduleD);
+  // jusqu'à x = 23 mm (parts.js, b_front) ; lobe haut du ₿, au-dessus de
+  // l'écran (y = +30,5 mm), centré en Z — les yeux de la photo réelle.
+  var US_X = 0.023, US_Y = 0.098;
+  var moduleUS = moduleHCSR04();
+  moduleUS.position.set(US_X, US_Y, 0);
+  groupeCorps.add(moduleUS);
 
-  // Sonde LOGIQUE : le firmware n'a qu'UN HC-SR04 (PIN_US_TRIG=11,
-  // PIN_US_ECHO=12, config.h l.61-62) — la mesure part du milieu des deux
-  // modules, à hauteur de la face avant des transducteurs.
-  var sonde = new THREE.Object3D();
-  sonde.position.set(US_X + 0.015, US_Y, 0);
-  groupeCorps.add(sonde);
+  // Origine de la MESURE : la face avant des transducteurs (grille à
+  // x_local = 14,1 mm + 1 mm de garde). Ce ne sont PAS des objets de la
+  // scène : la distance est calculée analytiquement depuis la pose
+  // physique (voir distanceReelleCm), jamais depuis le maillage animé.
+  var SONDE_X = US_X + 0.015, SONDE_Y = US_Y;
 
-  // Faisceau ultrason : cône apex au capteur, s'évasant vers l'obstacle
-  // (demi-angle ~7°, proche du lobe du HC-SR04). Couleur selon l'état.
+  // Faisceau ultrason : cône apex au capteur, allongé vers l'obstacle.
+  // Rayon constant 12,2 mm (seul scale.x varie) : le demi-angle apparent
+  // dépend donc de la longueur (≈ 5,4° à 13 cm, ≈ 0,5° à 150 cm) — c'est
+  // un pointeur visuel, PAS le lobe réel (~15°) du HC-SR04. Couleur selon
+  // l'état. Visuellement solidaire du corps (enfant de groupeCorps) : il
+  // suit les animations, mais sa LONGUEUR vient de la distance physique.
   var geoFaisceau = new THREE.ConeGeometry(0.0122, 1, 24, 1, true);
   geoFaisceau.translate(0, -0.5, 0);          // apex à l'origine, base à y = −1
   geoFaisceau.rotateZ(Math.PI / 2);           // base vers +X
@@ -479,12 +483,12 @@
     depthWrite: false, side: THREE.DoubleSide
   });
   var faisceau = new THREE.Mesh(geoFaisceau, matFaisceau);
-  faisceau.position.copy(sonde.position);
+  faisceau.position.set(SONDE_X, SONDE_Y, 0);
   groupeCorps.add(faisceau);
 
   // ---- Obstacle déplaçable : plaque verticale devant le robot. Le curseur
   //      fixe sa position au RESET du robot (x = 0 = axe des roues) ; la
-  //      distance MESURÉE est recalculée chaque frame depuis la sonde. ----
+  //      distance MESURÉE est recalculée depuis la sonde (pose physique). ----
   var OBSTACLE_EP = 0.01;                     // épaisseur 10 mm
   var obstacle = new THREE.Mesh(
     new THREE.BoxGeometry(OBSTACLE_EP, 0.14, 0.10),
@@ -503,13 +507,21 @@
   // Distance RÉELLE capteur → face avant de l'obstacle, dans le plan du sol
   // (l'obstacle est vertical : l'écho revient de sa face, quelle que soit la
   // hauteur). −1 = obstacle derrière le capteur (pas d'écho).
-  var vSonde = new THREE.Vector3();
+  // Calculée ANALYTIQUEMENT depuis la pose PHYSIQUE (sim.state), jamais
+  // depuis le maillage : les offsets d'animation (pitch/lacet/saut) sont
+  // ajoutés à groupeCorps APRÈS la pose physique dans majScene() — ils sont
+  // cosmétiques et ne doivent pas toucher la mesure, exactement comme sur
+  // le robot réel où le HC-SR04 ne connaît que θ et le roulement.
+  // Pose monde de la sonde (repère de l'en-tête) :
+  //   x = R·(θ+φ) + SONDE_X·cos θ + SONDE_Y·sin θ,   z = 0 (pas de lacet
+  //   physique — seul le tangage θ et le roulement R·(θ+φ) existent).
   function distanceReelleCm() {
-    sonde.getWorldPosition(vSonde);
-    var dx = (obstacle.position.x - OBSTACLE_EP / 2) - vSonde.x;
+    var th = sim.state.theta * DEG;
+    var xSonde = R * (th + sim.state.phi * DEG) +
+                 SONDE_X * Math.cos(th) + SONDE_Y * Math.sin(th);
+    var dx = (obstacle.position.x - OBSTACLE_EP / 2) - xSonde;
     if (dx < 0) return -1;
-    var dz = obstacle.position.z - vSonde.z;
-    return Math.sqrt(dx * dx + dz * dz) * 100;   // m → cm
+    return dx * 100;                            // m → cm (z sonde = z obstacle = 0)
   }
 
   // ======================================================================

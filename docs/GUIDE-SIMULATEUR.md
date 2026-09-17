@@ -174,6 +174,10 @@ vaut :
   9,5 ms) ;
 - la mesure de distance est **horizontale** : un obstacle très bas ou très haut ne serait
   pas distingué ;
+- **pas de collision** : le robot peut traverser l'obstacle et rouler au-delà — le firmware
+  ne réagit pas à l'obstacle (il publie la distance et l'alerte, c'est tout), le simulateur
+  fait pareil. La distance devient simplement négative (−1, « pas d'écho ») une fois la
+  plaque dépassée ;
 - après une chute, la simulation **s'arrête** (elle ne rejoue pas le robot à terre) ;
 - les frottements, le jeu mécanique, la souplesse des servos et l'usure **ne sont pas
   modélisés** : si le robot réel se comporte moins bien que la simulation, cherche d'abord

@@ -86,6 +86,7 @@
   #us-etat.alerte { color: var(--rouge); font-weight: 700; }
   #us-etat.obstacle { color: var(--vert); }
   #us-etat.rien { color: var(--texte-dim); }
+  p.aide-us { font-size: 11px; color: var(--texte-dim); margin: 8px 0 0; }
   #verdict.ok     { color: var(--vert); font-weight: 600; }
   #verdict.chute  { color: var(--rouge); font-weight: 600; }
   #verdict.panique{ color: var(--jaune); font-weight: 600; }
@@ -188,6 +189,10 @@
           <span class="nom">Tête pan / tilt</span> <span id="us-tete">—</span>
           <span class="nom">Angle vu</span>        <span id="us-angle">—</span>
         </div>
+        <p class="aide-us">Le curseur place le <b>centre</b> d'une plaque de
+          10&nbsp;mm, mesuré depuis l'axe des roues au RESET — si le robot roule,
+          la distance mesurée s'en écarte. En PAUSE la télémétrie est figée (le
+          capteur ne tique qu'en marche) alors que le faisceau suit le curseur.</p>
       </div>
 
       <div class="panneau">

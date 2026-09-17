@@ -42,6 +42,15 @@
   var PAN_CENTRE = 90.0, TILT_CENTRE = 60.0;          // l.59-62, l.194-195
   // Timeout pulseIn : portée utile × 58 µs/cm + marge (l.134).
   var ECHO_TIMEOUT_US = US_MAX_CM * 58 + 800;         // = 9500 µs
+  // Dans le core ESP32 (wiring_pulse.c), le chronomètre de pulseIn part À
+  // L'APPEL : l'attente du front montant d'ECHO (~450–500 µs après TRIG sur
+  // un HC-SR04, délai interne du module) consomme le budget — c'est
+  // justement à quoi sert la marge de 800 µs du firmware. Conséquence : le
+  // vrai robot compte un échec au-delà de (9500 − 480)/58 ≈ 155 cm, pas
+  // 163,8 cm. On reproduit ce délai (480 µs, milieu de la plage mesurée) ;
+  // le négliger laisserait le simulateur « voir » des échos entre ~155 et
+  // ~164 cm que le robot réel ne verrait pas.
+  var ECHO_DELAI_FRONT_US = 480;
   // Cadence adaptative : 200 ms, 1000 ms après 3 échecs consécutifs (l.108).
   var INTERVAL_NORMALE_MS = 200, INTERVAL_ECHEC_MS = 1000;
 
@@ -88,11 +97,13 @@
     // distReelCm : distance RÉELLE capteur→obstacle calculée par le viewer
     // (−1 = rien devant). Retourne true si un écho a été reçu.
     function measureUltrasonic(distReelCm) {
-      // pulseIn(ECHO, HIGH, ECHO_TIMEOUT_US) : l'écho revient si la durée
-      // aller-retour (dist × 58 µs/cm) tient dans le timeout (l.134-135).
+      // pulseIn(ECHO, HIGH, ECHO_TIMEOUT_US) : le budget du timeout couvre
+      // AUSSI l'attente du front montant (ECHO_DELAI_FRONT_US, voir en
+      // tête) — l'écho revient si délai + durée aller-retour (dist × 58
+      // µs/cm) tient dans le timeout (l.134-135, wiring_pulse.c).
       // Capteur débranché : ECHO ne monte jamais → timeout systématique.
       var dureeOk = actif && distReelCm >= 0 &&
-                    distReelCm * 58.0 <= ECHO_TIMEOUT_US;
+                    distReelCm * 58.0 + ECHO_DELAI_FRONT_US <= ECHO_TIMEOUT_US;
 
       // l.137-140 : distance = durée / 58 ; timeout → −1.
       var distanceCm = dureeOk ? distReelCm : -1.0;
@@ -241,6 +252,7 @@
       US_STOP_CM: US_STOP_CM,
       US_SMOOTH_COUNT: US_SMOOTH_COUNT,
       ECHO_TIMEOUT_US: ECHO_TIMEOUT_US,
+      ECHO_DELAI_FRONT_US: ECHO_DELAI_FRONT_US,
       INTERVAL_NORMALE_MS: INTERVAL_NORMALE_MS,
       INTERVAL_ECHEC_MS: INTERVAL_ECHEC_MS,
       HEAD_PAN_MIN: HEAD_PAN_MIN, HEAD_PAN_MAX: HEAD_PAN_MAX,

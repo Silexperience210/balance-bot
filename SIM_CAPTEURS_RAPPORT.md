@@ -37,14 +37,17 @@ comme le firmware, il ne déclenche aucune réaction physique du robot.
 
 - **Garde-fou** : bannière d'erreur si `ultrason.js` est absent (même esprit que
   celui d'`engine.js`).
-- **Modules HC-SR04 en 3D** : pièces achetées, pas de STL → modélisation
+- **Module HC-SR04 en 3D** : pièce achetée, pas de STL → modélisation
   Three.js : PCB bleu 45 × 20 × 2 mm + deux transducteurs Ø16 × 12 mm avec
-  grille avant. Deux modules symétriques (z = ±26 mm) sur la face avant, partie
-  haute du ₿ (y = +98 mm au-dessus de l'axe), plaqués sur la coque (x = 23 mm,
-  face avant mesurée sur `parts.js`). Ajoutés à `groupeCorps` → ils suivent
-  exactement les transformations du corps.
-- **Sonde logique** : le firmware n'a qu'UN HC-SR04 (`config.h:61-62`) ; la
-  mesure part du milieu des deux modules, à la face avant des transducteurs.
+  grille avant. UN SEUL module, comme le robot réel (`config.h:61-62` :
+  un TRIG, un ECHO ; `docs/photos/robot-reel.jpg`) : centré en Z sur la face
+  avant, lobe haut du ₿ (y = +98 mm au-dessus de l'axe), plaqué sur la coque
+  (x = 23 mm, face avant mesurée sur `parts.js`). Ajouté à `groupeCorps` →
+  il suit exactement les transformations du corps.
+- **Mesure analytique** : la distance est calculée depuis la pose PHYSIQUE
+  (`sim.state` : x = R·(θ+φ) + SONDE_X·cos θ + SONDE_Y·sin θ), jamais depuis
+  le maillage — les animations ne peuvent pas la toucher (voir
+  « Après contre-vérification »).
 - **Obstacle déplaçable** : plaque verticale de 10 × 140 × 100 mm posée au sol,
   placée par le curseur (5–200 cm). La distance mesurée est recalculée chaque
   frame **depuis la sonde** (`getWorldPosition`) jusqu'à la face avant de
@@ -174,8 +177,9 @@ ouvrant `sim/web/selfcheck.html` en `file://`.)
 - **La distance est figée pendant chaque lot** de pas calculés entre deux
   frames (échantillonnée une fois par frame) : invisible, car le capteur
   n'échantillonne qu'au plus tous les 40 pas (200 ms).
-- **Un seul capteur logique** (comme le firmware, `config.h:61-62`) alors que
-  deux modules sont modélisés visuellement : la mesure part du milieu des deux.
+- **Un seul capteur, logique ET visuel** (comme le firmware et le robot
+  réel, `config.h:61-62` + photo) : un seul module HC-SR04 modélisé, la
+  mesure part de la face avant de ses transducteurs.
 - Le blocage de `pulseIn` (jusqu'à 9,5 ms volés à la boucle d'équilibre) n'est
   **pas** répercuté sur la physique — ce serait modifier le moteur, interdit
   par la mission ; seule la cadence des mesures est reproduite.
@@ -183,10 +187,113 @@ ouvrant `sim/web/selfcheck.html` en `file://`.)
 ## Fichiers modifiés
 
 - `sim/web/ultrason.js` — **nouveau** (capteur HC-SR04 + tête, miroir de `head.cpp`)
-- `sim/web/ui.js` — modules 3D, sonde, faisceau, obstacle, animations, télémétrie capteur
+- `sim/web/ui.js` — module 3D, mesure analytique, faisceau, obstacle, animations, télémétrie capteur
 - `sim/web/index.html` — panneaux « Capteur ultrason » et « Animations », script `ultrason.js`
 - `sim/web/selfcheck.js` — section 5 (16 contrôles ultrason/tête), sections 1–4 inchangées
 - `sim/web/selfcheck.html` — chargement d'`ultrason.js`
 - `chassis/assets/emballer_simulateur.py` — `ultrason.js` ajouté à l'ordre d'inlining
 - `sim/web/simulateur-balancebot.html` — régénéré (bundle mono-fichier)
 - `simulateur.html` (racine) — copie du bundle régénéré
+
+---
+
+## Après contre-vérification (rapport indépendant `/home/silex/REVIEW_SIM_CAPTEURS.md`, HEAD `4796227`)
+
+La contre-vérification a validé l'essentiel et relevé un défaut bloquant
+(point C : les animations faussaient la mesure) plus des finitions. Tous les
+points sont traités, dans `sim/web/` + `docs/GUIDE-SIMULATEUR.md` uniquement ;
+`engine.js` et la physique d'`ultrason.js` n'ont pas bougé (seul le critère
+d'écho du point F-b est corrigé, voir ci-dessous).
+
+**1. (BLOQUANT, défaut C) La distance ne dépend plus des animations.**
+Avant : la sonde était un `Object3D` enfant de `groupeCorps`, donc
+`distanceReelleCm()` (via `getWorldPosition()`) incluait les offsets
+d'animation appliqués par `majScene()`. Correction choisie : la distance est
+calculée **analytiquement depuis la pose physique** (`sim.state`), sans passer
+par la scène :
+
+```
+x_sonde = R·(θ+φ) + SONDE_X·cos θ + SONDE_Y·sin θ     (z = 0)
+```
+
+C'est la garantie la plus forte : les offsets d'animation n'existant que dans
+le maillage, une mesure qui ne lit pas le maillage ne peut pas les voir — par
+construction, pas par convention. Le **faisceau reste enfant de
+`groupeCorps`** (il suit visuellement le corps, animations comprises : c'est
+le choix assumé, il n'est qu'un pointeur), mais sa **longueur** vient de la
+distance physique. Vérifié **par la mesure** (banc Node/Playwright dans
+`/tmp/bench`, Chrome, même méthode que le rapport — pause, curseur 18 cm,
+θ = 2°) :
+
+| | anim « aucune » | hochement | regard | sursaut | danse |
+|---|---|---|---|---|---|
+| **avant** (HEAD) | 13,215 cm | 12,56–13,90 (Δ 1,34) | 13,22–13,42 (Δ 0,21) | 13,22–14,07 (Δ 0,86) | 12,87–13,88 (Δ 1,01) |
+| **après** | 13,215 cm | **13,215 cm fixe (Δ 0,000)** | idem | idem | idem |
+
+En RUN (« θ0=2° propre », curseur 18 cm) : lissée 13,126 cm sans animation ;
+après 3 s de « danse » : **13,124 cm** après correction (13,281 cm avant,
+fluctuante). La valeur de référence 13,215 cm est strictement identique avant
+et après : la formule analytique retombe sur la pose monde mesurée (sonde
+x = 42,85 mm).
+
+**2. (BLOQUANT, F-5) Un seul module HC-SR04.** Le robot réel n'a qu'un module
+(`config.h:61-62` ; sur la photo ce sont ses deux transducteurs qui font les
+« yeux »). La scène 3D n'en modélise plus qu'**un**, centré en Z (z = 0) à la
+place des yeux de la photo : face avant x = 23 mm, lobe haut y = +98 mm,
+au-dessus de l'écran. Logique inchangée (un seul capteur, comme le firmware).
+
+**3. (E) Panneau « Obstacle » clarifié.** Ajout d'une ligne d'aide dans le
+panneau : le curseur place le **centre d'une plaque de 10 mm mesuré depuis
+l'axe des roues au RESET** (si le robot roule, la mesure s'en écarte), et en
+**PAUSE** la télémétrie est figée (le capteur ne tique qu'en marche) alors que
+le faisceau suit le curseur.
+
+**4. (F-b) Seuil d'écho réel ≈ 155 cm — reproduit, pas seulement documenté.**
+Dans le core ESP32, le timeout de `pulseIn` court depuis l'appel, attente du
+front montant d'ECHO incluse (~450–500 µs après TRIG — à quoi sert la marge
+de 800 µs du firmware). `ultrason.js` modélise désormais ce délai
+(`ECHO_DELAI_FRONT_US = 480`, milieu de la plage) : l'écho revient si
+`dist×58 + 480 ≤ 9500 µs`, soit un seuil à **155,5 cm** comme le vrai robot.
+Le selfcheck borne le seuil : 155 cm = écho hors portée sans échec, 156 cm =
+échec compté.
+
+**5. (F-f) Trous de l'auto-test comblés** (section 5 : 16 → 20 contrôles) :
+vitesse de pan mesurée (90 → 120° en 1 s de balayage), vitesse de tilt
+(60 → 75° en 0,5 s), bornes du tilt en balayage (20…90°), `angleVu` testé à
+un pan ≠ 90° (alerte pendant le balayage → 96°, pas le centre). Contre-épreuve
+par mutation : `PAN_SPEED 30→60` ✘ détecté (2 contrôles), `HEAD_TILT_MIN 20→0`
+✘ détecté, `ECHO_DELAI_FRONT_US 480→0` ✘ détecté.
+
+**6. Libellé** : « moyenne re-amorcée à 50 » → « moyenne amorcée à 50 (premier
+écho reçu) » — le capteur n'avait jamais reçu d'écho dans ce scénario.
+
+**7. Commentaire du faisceau** : le « demi-angle ~7° » était faux
+(`ConeGeometry(0.0122, 1)` = 0,7° à 1 m, et seul `scale.x` varie). Le
+commentaire dit désormais la vérité : rayon constant 12,2 mm, demi-angle
+apparent dépendant de la longueur — un pointeur visuel, pas le lobe réel
+(~15°) du HC-SR04.
+
+**8. Pas de collision** : écrit dans `docs/GUIDE-SIMULATEUR.md` §8 (« Ce que le
+simulateur ne fait pas ») — le robot peut traverser l'obstacle, comme le
+firmware qui ne réagit pas.
+
+**Validation finale** : bundle régénéré (`emballer_simulateur.py` →
+`sim/web/simulateur-balancebot.html`, 1 426 820 octets, 6 fichiers inlinés,
+0 `<script src=` résiduel) et copié sur `simulateur.html` à la racine
+(`cmp` identique). `node sim/web/selfcheck.js` → exit 0, sections 1–4
+inchangées, section 5 (extraits) :
+
+```
+  ✔ 155 cm : écho reçu mais hors portée (obstacleCm = −1, pas d'échec)
+  ✔ 156 cm : au-delà du seuil réel (9528 > 9500 µs) → échec compté
+  ✔ 170 cm : au-delà du timeout pulseIn (10340 > 9500 µs) → échec compté
+  ✔ balayage hors équilibre : tilt borné à 20…90° (vu 20…90)
+  ✔ vitesse de pan 30°/s : 90 → 120° après 1 s de balayage (attendu 120)
+  ✔ vitesse de tilt 30°/s : 60 → 75° après 0,5 s de balayage (attendu 75)
+  ✔ alerte pendant le balayage : angle vu = pan courant (96°, ≠ 90°)
+═══ AUTO-TEST RÉUSSI ═══
+```
+
+(même verdict « AUTO-TEST RÉUSSI » sous Chrome headless en `file://` ; rendu
+du bundle vérifié par capture : un seul module à deux transducteurs au-dessus
+de l'écran, comme la photo.)
