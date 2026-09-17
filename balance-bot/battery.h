@@ -13,5 +13,6 @@
 namespace Battery {
   void  begin();
   float readVolts();   // tension estimée en volts ; -1 = aucune batterie plausible
-  bool  isLow();       // dernière lecture VALIDE sous BAT_LOW_V
+  bool  isLow();       // BAT_LOW_SAMPLES lectures VALIDES consécutives sous BAT_LOW_V ;
+                       // retombe au-dessus de BAT_LOW_V + 0,1 V (hystérésis) — cf. battery.cpp
 }

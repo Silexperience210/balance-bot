@@ -40,7 +40,7 @@ struct BotState {
   uint16_t dbgTouchMaxMs = 0;  // pire g_touch->read() (I2C CST816) — cumulatif
   uint16_t dbgDrawMaxMs  = 0;  // pire bloc de dessin dans Ui::loop() — cumulatif
   float batteryV  = 0.0f;    // tension batterie (-1 = aucune batterie plausible : USB seul)
-  bool  batteryLow = false;  // vrai si lecture valide ET sous BAT_LOW_V
+  bool  batteryLow = false;  // vrai si lecture valide ET sous BAT_LOW_V (hystérésis + N lectures, battery.cpp)
   // commandes UI (module B) — consommées par la boucle d'équilibre
   int   cmdForward = 0;      // -100..+100 (vitesse avant/arrière)
   int   cmdTurn    = 0;      // -100..+100 (rotation)
@@ -58,7 +58,7 @@ extern BotState g_state;     // instance globale unique, définie dans le .ino
 
 // ── Module A : équilibre (imu.h / balance.h / feet.h) ──────────────
 // Implémente : IMU MPU6050 sur I2C, filtre, PID 200 Hz, pieds en arc
-// sur servos de POSITION (mécanique v2 — plus de roues).
+// sur servos de POSITION (mécanique v3.1 — plus de roues).
 namespace Balance {
   bool  begin();                 // init IMU + servos ; false si IMU absent
   void  loop();                  // 1 itération 200 Hz (appelée par le .ino)
@@ -75,6 +75,10 @@ namespace Balance {
   // Cascade de recentrage des pieds (position φ → vitesse → θ_ref).
   void  setRecenterGains(float kpPhi, float kv);  // bornés 0-5 / 0-20
   void  getRecenterGains(float& kpPhi, float& kv);
+  // Autorité de sortie kOutToFootDegS (°/s de pied par unité de sortie PID),
+  // bornée 1-3, persistée NVS — REVIEW_CLAUDE.md M11.
+  void  setOutScale(float k);
+  float getOutScale();
   float pitchRateDps();          // dernière vitesse gyro (°/s) — télémétrie
 }
 
@@ -83,7 +87,7 @@ namespace Balance {
 // Entièrement inerte tant qu'aucun client ne sollicite le serveur.
 namespace Tuner {
   bool  begin();                 // ouvre l'AP « BalanceBot-Tune » ; false si échec
-  void  loop();                  // sert au plus une requête (no-op si !begin())
+  void  loop();                  // no-op : le serveur vit sur sa propre tâche (cœur 0) ; conservé pour le contrat
   bool  active();                // true si un client a dialogué récemment
 }
 
@@ -107,5 +111,5 @@ namespace Head {
 namespace Battery {
   void  begin();
   float readVolts();             // via PIN_BAT_VOLT (ADC atténué) ; -1 si invalide
-  bool  isLow();                 // dernière lecture valide sous le seuil bas
+  bool  isLow();                 // batterie faible (hystérésis 3,5/3,6 V + N lectures consécutives)
 }

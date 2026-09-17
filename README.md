@@ -16,7 +16,7 @@ balance-bot/            ← FIRMWARE (le code qui tourne sur la carte)
   ui.cpp                écran 320×170 paysage (CST816) + boutons
   tuner.cpp/h           banc de réglage web à chaud (AP BalanceBot-Tune)
   build.sh              compile + flash (defines 170×320, /dev/ttyACM0)
-chassis/                châssis v2 : gen_chassis.py + STL + FIT_NOTES
+chassis/                châssis v3.1 : gen_bitcoin_bot.py + STL (v3/) + NOTES_v3.md
 sim/                    simulateur 1D (pendule inversé, contrôleur identique)
 TEST_PROTOCOL.md        protocole du premier essai debout (à lire avant)
 BACKLOG.md              suivi du marathon d'amélioration

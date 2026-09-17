@@ -101,6 +101,41 @@ bool readRaw(Raw& r) {
   return true;
 }
 
+// ── Vivacité du capteur (REVIEW_CLAUDE.md M9) ──────────────────────
+// readRaw() ne détecte que l'échec de TRANSACTION. Un MPU6050 qui ACK mais
+// renvoie des registres FIGÉS (retombé en veille/reset après un creux
+// d'alimentation : trame de zéros, ou dernière valeur gelée) passerait
+// pour vivant — et le robot s'asservirait sur un angle mort sans jamais
+// lever s_imuLost. Or le bruit propre du capteur (≥ 2 LSB rms par axe,
+// 6 axes) rend deux trames VIVANTES strictement identiques sur les 7 mots
+// quasi impossibles… sauf quand la boucle relit le MÊME échantillon : la
+// cadence par millis() du .ino est quantifiée et une lecture peut tomber
+// < 5 ms après la précédente. D'où le seuil : au-delà de kFrozenMax trames
+// identiques CONSÉCUTIVES, la trame est traitée comme PERDUE (update()
+// renvoie false) et alimente le compteur kImuFailMax de balance.cpp. Une
+// trame qui change remet tout à zéro (reprise automatique, cf. M19).
+constexpr uint8_t kFrozenMax = 4;             // 4 × 5 ms = 20 ms
+Raw     s_prevRaw{};
+bool    s_havePrev     = false;
+uint8_t s_frozenStreak = 0;
+
+inline bool sameRaw(const Raw& a, const Raw& b) {
+  return a.ax == b.ax && a.ay == b.ay && a.az == b.az && a.t == b.t &&
+         a.gx == b.gx && a.gy == b.gy && a.gz == b.gz;
+}
+
+// Lecture brute + test de vivacité : false si transaction ratée OU trame
+// figée depuis kFrozenMax lectures. Partagé par update() et calibrate().
+bool readLive(Raw& r) {
+  if (!readRaw(r)) return false;
+  const bool frozen = s_havePrev && sameRaw(r, s_prevRaw);
+  s_prevRaw  = r;
+  s_havePrev = true;
+  if (!frozen) { s_frozenStreak = 0; return true; }
+  if (s_frozenStreak < 255) s_frozenStreak++;
+  return s_frozenStreak < kFrozenMax;
+}
+
 // Axe gyro utilisé pour le pitch (voir bloc RÉGLAGE MÉCANIQUE).
 inline int16_t gyroPitchRaw(const Raw& r) { return r.gy; }
 
@@ -152,6 +187,8 @@ bool begin() {
   if (!readRaw(r)) return false;
   s_accPitch = accelPitch(r) - kMountOffsetDeg;
   s_pitch    = s_accPitch;                // amorce le filtre sur l'accel
+  s_havePrev     = false;                 // vivacité : repart de zéro
+  s_frozenStreak = 0;
   s_ok = true;
   return true;
 }
@@ -159,18 +196,25 @@ bool begin() {
 bool calibrate(uint16_t samples) {
   if (!s_ok) return false;
 
+  // Le capteur produit un échantillon toutes les 5 ms (kSmplrtDiv = 4) :
+  // lire plus vite relit le même registre. L'ancienne boucle à ~1,4 kHz
+  // donnait 400 lectures ≈ 60 échantillons distincts lus 7× chacun — biais
+  // √7 fois plus bruité qu'annoncé (REVIEW_CLAUDE.md M18). On lit donc à
+  // ~200 Hz (delay(5) + ~0,4 ms de transaction > 5 ms : jamais deux fois
+  // le même échantillon) pendant ~2 s, et readLive() écarte de toute façon
+  // les trames figées (M9), qui ne comptent pas.
   double sumGyro = 0.0, sumPitch = 0.0;
   uint16_t got = 0;
   for (uint16_t i = 0; i < samples; i++) {
     Raw r;
-    if (readRaw(r)) {
+    if (readLive(r)) {
       sumGyro  += gyroPitchRaw(r);
       sumPitch += accelPitch(r);
       got++;
     }
-    delayMicroseconds(700);               // ~1.4 kHz d'essais → 400 pts ≈ 0.3 s
+    delay(5);                             // 200 Hz → 400 pts ≈ 2,2 s (setup())
   }
-  if (got < samples / 2) return false;    // bus instable : on ne fige rien
+  if (got < samples / 2) return false;    // bus instable / figé : on ne fige rien
 
   s_gyroBias = (float)(sumGyro / got);
   s_accPitch = (float)(sumPitch / got) - kMountOffsetDeg;
@@ -182,7 +226,7 @@ bool update(float dtSec) {
   if (!s_ok) return false;
 
   Raw r;
-  if (!readRaw(r)) return false;          // trame perdue → on garde l'état
+  if (!readLive(r)) return false;         // trame perdue OU figée → on garde l'état
 
   s_tempC    = (float)r.t / 340.0f + 36.53f;
   s_rate     = kGyroPitchSign * ((float)gyroPitchRaw(r) - s_gyroBias) / kGyroLsb;

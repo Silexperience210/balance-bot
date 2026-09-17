@@ -2,38 +2,69 @@
 """Simulateur 1D BalanceBot — pendule inversé sur pieds en arc.
 
 Modélise le contrôleur RÉEL de balance.cpp : PID d'équilibre **+ cascade de
-recentrage** (lot 2c), pieds en arc sur servos de position, avec le modèle
-physique du roulement EXACT.
+recentrage** (lot 2c), pieds en arc sur servos de position, physique du
+roulement par les équations de Lagrange (masse ponctuelle, arc sans masse,
+angle de servo imposé).
+
+RÈGLE D'OR : mêmes boucles, mêmes constantes, mêmes SIGNES que balance.cpp.
+Deux écarts de signe (boucle interne de la cascade, soft clamp) ont vécu ici
+8 jours sans être vus (REVIEW_CLAUDE.md M1, M2) : toute modification de
+balance.cpp se porte ici le même jour, et réciproquement.
 
 Usage :
   python3 balancebot_sim.py                 # jeux de gains par défaut, PID+cascade
   python3 balancebot_sim.py 25 500 0.5      # Kp Ki Kd
+  python3 balancebot_sim.py 25 500 0.5 3    # Kp Ki Kd k_out (= kOutToFootDegS)
   python3 balancebot_sim.py --no-cascade    # comparaison sans la cascade
-  python3 balancebot_sim.py --sweep         # balayage de gains (tient les 6 scénarios ?)
+  python3 balancebot_sim.py --sweep         # balayage Kp/Ki/Kd/k_out (tient les 6 scénarios ?)
 
 ── Physique (modèle) ────────────────────────────────────────────────────────
-Pendule inversé de hauteur de CoM h, base roulante de rayon R. La position du
-pied est l'angle de servo φ (relatif au corps) ; le pied est un arc de rayon R
-qui roule sans glisser, donc son rotation ABSOLUE vaut (θ + φ) et :
+Pendule inversé : masse ponctuelle m à la hauteur h au-dessus de l'axe, arc de
+rayon R centré sur l'axe, qui roule sans glisser. La position du pied est
+l'angle de servo φ (relatif au corps), IMPOSÉ par le servo ; la rotation
+ABSOLUE de l'arc vaut (θ + φ), donc x_axe = R·(θ + φ). Lagrange avec
+T = ½·m·(ẋ² + ẏ²) du CoM et V = m·g·(R + h·cosθ), φ(t) donné :
 
-    x = R·(θ + φ)          ⇒     ẍ = R·(θ̈ + φ̈)
+    θ̈ · (R² + 2·R·h·cosθ + h²) = g·h·sinθ − φ̈ · R·(R + h·cosθ) + R·h·sinθ · θ̇²
 
-    θ̈ = [ (g/h)·sinθ − (R/h)·φ̈·cosθ ] / ( 1 + (R/h)·cosθ )
+Aux petits angles : θ̈ = g·h/(R+h)²·θ − R/(R+h)·φ̈, pôle instable
+√(g·h)/(R+h) = 7,87 rad/s. L'ancienne équation « chariot-pendule »
+θ̈ = [(g/h)·sinθ − (R/h)·φ̈·cosθ]/(1 + (R/h)·cosθ) oubliait le couple de
+réaction du servo sur le corps (le servo est vissé sur le corps) et le terme
+centrifuge : même autorité de commande, mais gravité g/(R+h) = 87,2 s⁻² au
+lieu de 62,0 (pôle 9,34 rad/s), ~19 % trop pessimiste (REVIEW_CLAUDE.md M5).
 
 Servo : suivi de la consigne de position en 1er ordre (τ = 50 ms) borné à
 250 °/s. Course de pied bornée à ±45° (butée dure de feet.cpp).
 
-Ce modèle N'EST PAS : ni la friction (conservateur), ni la borne d'accélération
-du servo, ni la 3D. Le réglage réel reste indispensable.
+── Ce que le modèle NE contient PAS (et qui dominera le réel) ───────────────
+· la trame PWM 50 Hz du SG90 : la consigne n'est prise qu'une fois toutes les
+  20 ms (échantillonneur-bloqueur, 0-20 ms de latence) — ici le servo suit
+  une consigne rafraîchie à 200 Hz ;
+· la mort-zone du SG90 (~5-10 µs ≈ 0,5-1° ≈ 0,3-0,6 mm de base) : elle
+  produira un cycle limite de quelques degrés que ce sim ne peut pas prédire ;
+· aucune borne d'ACCÉLÉRATION du servo (φ̈ impulsionnel au premier pas,
+  +800 °/s² dans les traces) — seule sa vitesse est bornée ;
+· ni la friction (conservateur), ni la 3D, ni la masse des pieds ;
+· le retard de mesure tau_f = 25 ms (ctrl()) est un forfait « retard total de
+  boucle » NON justifié finement — le verdict sur les gains embarqués en
+  dépend (REVIEW_CLAUDE.md §2 #9).
+Le réglage réel reste indispensable.
 
-── État de validation (mesuré, 09/09/2026) ──────────────────────────────────
-Les gains Kp25/Ki500/Kd0.5 livrés dans balance.cpp NE tiennent PAS dans ce
-modèle corrigé (0/6 scénarios, avec ou sans cascade) : le pied consomme ses
-±45° de course et le robot tombe. C'est cohérent avec le constat du commit
-19535f7 (« gains validés non fiables, réglage réel indispensable ») : la
-validation d'origine avait été faite avec un modèle 57× trop optimiste
-(facteur °/rad) et SANS cascade. Utiliser ce script pour CHERCHER des gains,
-pas pour certifier ceux qui sont embarqués.
+── État de validation (mesuré, 17/09/2026, après REVIEW_CLAUDE.md) ─────────
+Gains embarqués Kp25/Ki500/Kd0.5, k_out = 1 : 0/6 AVANT comme APRÈS les
+corrections M1/M2/M3/M5/M10 — chute θ en 0,4-0,5 s, donc AVANT la tape
+(t = 3 s) : les trois scénarios « tape » ne sont jamais joués avec ces gains.
+Le balayage Kp/Ki/Kd × k_out ∈ {1, 2, 3} ne trouve aucun 6/6 : cascade à
+Kv = 3 → tout panique φ en 0,2-0,4 s (elle sature la sortie) ; Kv = 0 ou sans
+cascade → au mieux 2/6 (les θ0 = 2°), et seulement pour k_out ≥ 2. Les tapes
+ne sont ATTEINTES qu'avec k_out = 3 et Kv = 0 (ex. Kp25/Ki350/Kd1 : θ0 = 2°
+tenus 6 s, panic φ 0,1-0,2 s APRÈS chaque tape — 0,4 rad/s consomme déjà les
+±25 mm de course). Le verdict dépend du retard forfaitaire tau_f = 25 ms
+(§2 #9, non modifié). Historique : la validation d'origine (09/09) reposait
+sur un modèle 57× trop optimiste (facteur °/rad) et SANS cascade (commit
+19535f7). Utiliser ce script pour CHERCHER des gains, pas pour certifier ceux
+qui sont embarqués.
 """
 import math, random, sys
 
@@ -43,18 +74,22 @@ TAU_SERVO, VMAX_SERVO = 0.05, 250.0  # servo : 1er ordre (s), vitesse max (°/s)
 DT = 1.0 / 200                       # pas de contrôle = 200 Hz (comme le code)
 
 # ── Constantes du contrôleur (copiées de balance.cpp) ────────────────
-INTEGRAL_MAX, OUT_MAX = 25.0, 90.0
-DEADBAND, FOOT_HARD, FOOT_MARGIN, FOOT_TAPER, FALL_ANGLE = 0.25, 45.0, 9.0, 10.0, 45.0
-OUT_TO_FOOT_DEGS = 1.0               # kOutToFootDegS
+OUT_MAX = 90.0
+INTEGRAL_MAX = OUT_MAX               # kIntegralMax = kOutMax (M10 : I est la raideur)
+DEADBAND = 0.0                       # kErrDeadbandDeg = 0 (M3 : la bande + I = cliquet)
+FOOT_HARD, FOOT_MARGIN, FOOT_TAPER, FALL_ANGLE = 45.0, 9.0, 10.0, 45.0
+# kOutToFootDegS n'est plus une constante : paramètre k_out de Sim (M11),
+# réglable au banc web (1-3) et balayé par --sweep.
 RECENTER_PERIOD = 0.100              # 10 Hz
 RECENTER_VEL_MAX, RECENTER_REF_MAX, RECENTER_SLEW = 20.0, 6.0, 3.0
 FOOT_VEL_TAU, FOOT_PANIC = 0.08, 35.0
 
 
 class Sim:
-    def __init__(self, kp, ki, kd, cascade=True, kp_phi=0.8, kv=3.0):
+    def __init__(self, kp, ki, kd, cascade=True, kp_phi=0.8, kv=3.0, k_out=1.0):
         self.kp, self.ki, self.kd = kp, ki, kd
         self.cascade, self.kp_phi, self.kv = cascade, kp_phi, kv
+        self.k_out = k_out               # kOutToFootDegS : °/s de pied par unité de sortie
         self.reset()
 
     def reset(self):
@@ -67,7 +102,14 @@ class Sim:
 
     # ── PID + cascade, à l'identique de balance.cpp ──────────────────
     def ctrl(self, noise, t):
-        tau_f = 0.025   # retard du filtre complémentaire (0,25 s ≈ α 0,98 à 200 Hz)
+        # Retard TOTAL de boucle forfaitaire (DLPF 42 Hz ≈ 5 ms + échantillonnage
+        # 2,5 ms + trame servo 50 Hz 0-20 ms), appliqué au pitch ET au gyro. Le
+        # filtre complémentaire, lui, n'a AUCUN retard sur le signal vrai (les
+        # voies gyro et accel se somment à 1 ; 0,25 s est sa fréquence de
+        # croisement, pas un lag). Valeur non justifiée finement : avec 25 ms les
+        # gains embarqués sont linéairement instables, sans ils sont marginaux
+        # (REVIEW_CLAUDE.md §2 #9) — le verdict du sim en dépend.
+        tau_f = 0.025
         pt, rt = self.theta * 180 / math.pi, self.dtheta * 180 / math.pi
         self.pitch_f += ((pt + random.gauss(0, noise * 0.15)) - self.pitch_f) * (DT / tau_f)
         self.rate_f += ((rt + random.gauss(0, noise * 1.5)) - self.rate_f) * (DT / tau_f)
@@ -89,11 +131,18 @@ class Sim:
                     else:
                         self.recenter_vel = target
 
-        # boucle INTERNE (200 Hz) : contribution à θ_ref
+        # boucle INTERNE (200 Hz) : contribution à θ_ref.
+        # SIGNE NON TRANCHÉ — à décider en réel, commencer kv = 0 au banc web
+        # (REVIEW_CLAUDE.md M1). Aligné sur balance.cpp recenterSetpoint() :
+        # −kRecenterKv·(v_cible − φ̇). De 6aabd3c à ce jour, ce sim portait le
+        # signe (+) pendant que le firmware avait (−) — règle d'or violée. La
+        # « preuve » par simulation du signe (−) est caduque (le sim ne tenait
+        # pas le PID seul) ; ici, les deux signes se testent en changeant cette
+        # seule ligne ET celle du firmware, jamais l'une sans l'autre.
         ref = 0.0
         if self.cascade:
             ref = max(-RECENTER_REF_MAX, min(RECENTER_REF_MAX,
-                                             self.kv * (self.recenter_vel - self.foot_vel_filt)))
+                                             -self.kv * (self.recenter_vel - self.foot_vel_filt)))
 
         setpoint = ref
         err = setpoint - self.pitch_f
@@ -106,15 +155,22 @@ class Sim:
         if abs(raw) < OUT_MAX or raw * err < 0:
             self.integ = cand
         out = max(-OUT_MAX, min(OUT_MAX, p + self.integ + d))
-        # soft clamp de butée (feet.cpp fournit φ intégré = phi_cmd)
-        if out * self.phi_cmd > 0:
+        # soft clamp de butée (feet.cpp fournit φ intégré = phi_cmd).
+        # ATTENTION AU SIGNE (REVIEW_CLAUDE.md M2) : `out` est la sortie PID NON
+        # inversée ; la vitesse de pied réelle est u = −out (run()). Le pied
+        # pousse vers la butée quand u·φ > 0 ⇔ (−out)·φ > 0 — c'est ce que teste
+        # balance.cpp (limitTowardStop après l'inversion : out·footAvg ≤ 0 →
+        # libre). L'ancien test `out * phi_cmd > 0` atténuait le RETOUR vers le
+        # centre et laissait la poussée vers la butée à pleine autorité.
+        if (-out) * self.phi_cmd > 0:
             lim = min(FOOT_HARD, 90.0 - abs(self.pitch_f) - FOOT_MARGIN)
             out *= max(0.0, min(1.0, (lim - abs(self.phi_cmd)) / FOOT_TAPER))
         # estimateur φ̇ : filtre 1er ordre de la commande APRÈS clamp, AVANT différentiel.
-        # ATTENTION AU SIGNE : la commande réellement envoyée à feet.cpp est -out
-        # (l'inversion stabilisante se fait chez l'appelant, comme dans balance.cpp).
+        # Même signe que ci-dessus : la commande réellement envoyée à feet.cpp est
+        # −out·k_out (l'inversion stabilisante se fait chez l'appelant, comme dans
+        # balance.cpp : updateFootVel(out · kOutToFootDegS)).
         alpha = DT / (FOOT_VEL_TAU + DT)
-        cmd_vel = -out * OUT_TO_FOOT_DEGS
+        cmd_vel = -out * self.k_out
         self.foot_vel_filt += alpha * (cmd_vel - self.foot_vel_filt)
         return out
 
@@ -124,14 +180,20 @@ class Sim:
         push_t, push_v = push or (0, 0)
         for k in range(int(tmax / DT)):
             t = k * DT
-            u = -self.ctrl(noise, t)          # câblage stabilisant (comme le firmware)
+            # câblage stabilisant (comme le firmware) puis °/s de pied via k_out
+            # (Feet::driveFootSpeed(out · kOutToFootDegS))
+            u = -self.ctrl(noise, t) * self.k_out
             self.phi_cmd = max(-FOOT_HARD, min(FOOT_HARD, self.phi_cmd + u * DT))
             dphi = max(-VMAX_SERVO, min(VMAX_SERVO, (self.phi_cmd - self.phi) / TAU_SERVO))
             dphidd = (dphi - self.prev_dphi) / DT * (math.pi / 180.0)   # rad/s²
             self.prev_dphi = dphi
             self.phi += dphi * DT
-            cos_t = math.cos(self.theta)
-            thdd = ((G / H) * math.sin(self.theta) - (R * dphidd / H) * cos_t) / (1.0 + (R / H) * cos_t)
+            # Lagrange (voir docstring) : θ̈·(R² + 2Rh cosθ + h²)
+            #   = g·h·sinθ − φ̈·R·(R + h·cosθ) + R·h·sinθ·θ̇²
+            cos_t, sin_t = math.cos(self.theta), math.sin(self.theta)
+            inertia = R * R + 2.0 * R * H * cos_t + H * H
+            thdd = (G * H * sin_t - dphidd * R * (R + H * cos_t)
+                    + R * H * sin_t * self.dtheta * self.dtheta) / inertia
             if push_t and abs(t - push_t) < DT / 2:
                 self.dtheta += push_v
             self.dtheta += thdd * DT
@@ -154,9 +216,9 @@ SCENARIOS = [
 ]
 
 
-def score(kp, ki, kd, cascade=True):
+def score(kp, ki, kd, cascade=True, k_out=1.0):
     random.seed(42)
-    s = Sim(kp, ki, kd, cascade=cascade)
+    s = Sim(kp, ki, kd, cascade=cascade, k_out=k_out)
     return sum(1 for _, kw in SCENARIOS if s.run(**kw)[0])
 
 
@@ -164,20 +226,27 @@ if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     cascade = "--no-cascade" not in sys.argv
     if "--sweep" in sys.argv:
+        # k_out (kOutToFootDegS) fait partie du balayage (M11) : c'est « le
+        # PREMIER bouton à monter » selon balance.cpp, il n'était jamais varié.
         print(f"Balayage (cascade={cascade}) — jeux tenant les {len(SCENARIOS)} scénarios :")
         found = 0
-        for kp in (0.5, 1, 2, 5, 10, 25, 50, 100):
-            for ki in (350, 500, 800, 1200, 2000):
-                for kd in (0.2, 0.5, 1, 2, 5, 10, 20):
-                    if score(kp, ki, kd, cascade) == len(SCENARIOS):
-                        print(f"  Kp={kp:<4} Ki={ki:<5} Kd={kd}")
-                        found += 1
+        for k_out in (1.0, 2.0, 3.0):
+            found_k = 0
+            for kp in (0.5, 1, 2, 5, 10, 25, 50, 100):
+                for ki in (350, 500, 800, 1200, 2000):
+                    for kd in (0.2, 0.5, 1, 2, 5, 10, 20):
+                        if score(kp, ki, kd, cascade, k_out) == len(SCENARIOS):
+                            print(f"  k_out={k_out:<3} Kp={kp:<4} Ki={ki:<5} Kd={kd}")
+                            found_k += 1
+            print(f"  (k_out={k_out} : {found_k} jeu(x))")
+            found += found_k
         print(f"→ {found} jeu(x) de gains")
     else:
         kp, ki, kd = (float(x) for x in args[:3]) if len(args) >= 3 else (25, 500, 0.5)
-        print(f"Gains Kp={kp} Ki={ki} Kd={kd} — cascade={'ON' if cascade else 'OFF'}")
+        k_out = float(args[3]) if len(args) >= 4 else 1.0
+        print(f"Gains Kp={kp} Ki={ki} Kd={kd} k_out={k_out} — cascade={'ON' if cascade else 'OFF'}")
         random.seed(42)
-        s = Sim(kp, ki, kd, cascade=cascade)
+        s = Sim(kp, ki, kd, cascade=cascade, k_out=k_out)
         ok_n = 0
         for label, kw in SCENARIOS:
             ok, why = s.run(**kw)

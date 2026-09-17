@@ -17,8 +17,19 @@ static const float ADC_FACTOR = 2.0f;   // pont diviseur 1/2
 static const float BAT_MIN_V = 3.0f;
 static const float BAT_MAX_V = 4.4f;
 
-// Dernière lecture valide sous le seuil bas (BAT_LOW_V, config.h).
-static bool s_low = false;
+// « Batterie faible » DÉBOUNCÉ + HYSTÉRÉTIQUE (REVIEW_CLAUDE.md M6). Une
+// LiPo 1S à mi-charge (~3,7 V à vide) plonge transitoirement sous 3,5 V à
+// chaque pointe de courant des 4 SG90 (1-2 A, résistance interne + câblage
+// volant) : décidé sur UN échantillon par seconde, le drapeau basculait au
+// hasard des pointes — et balance.cpp s'en servait pour désarmer. On exige
+// donc BAT_LOW_SAMPLES lectures VALIDES consécutives sous BAT_LOW_V pour
+// déclarer la batterie faible, et une lecture au-dessus de BAT_LOW_CLEAR_V
+// (+0,1 V) pour la déclarer bonne à nouveau ; entre les deux seuils l'état
+// ne change pas. À 1 lecture/s (.ino) : ~3 s de tension basse soutenue.
+static const float   BAT_LOW_CLEAR_V = BAT_LOW_V + 0.1f;   // 3,6 V
+static const uint8_t BAT_LOW_SAMPLES = 3;
+static bool    s_low       = false;
+static uint8_t s_lowStreak = 0;       // lectures valides consécutives < BAT_LOW_V
 
 void begin() {
   // PIN_BAT_VOLT = GPIO4 = ADC1_CH3 — lecture analogique simple
@@ -37,9 +48,16 @@ float readVolts() {
   const float volts = (pinMv / 1000.0f) * ADC_FACTOR;
   if (pinMv == 0 || volts < BAT_MIN_V || volts > BAT_MAX_V) {
     s_low = false;      // pas de batterie mesurable : ni basse ni haute
+    s_lowStreak = 0;
     return -1.0f;       // « aucune batterie plausible » (cf. interfaces.h)
   }
-  s_low = (volts < BAT_LOW_V);
+  if (volts < BAT_LOW_V) {
+    if (s_lowStreak < BAT_LOW_SAMPLES) s_lowStreak++;
+    if (s_lowStreak >= BAT_LOW_SAMPLES) s_low = true;
+  } else {
+    s_lowStreak = 0;
+    if (volts > BAT_LOW_CLEAR_V) s_low = false;   // 3,5-3,6 V : inchangé
+  }
   return volts;
 }
 

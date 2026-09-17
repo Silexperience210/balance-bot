@@ -130,7 +130,10 @@ void loop() {
     bootDone = false;
   } else if (bootNow && !bootDone && (nowMs - bootDownMs >= 1500)) {
     bootDone = true;
-    Serial.printf("BANC WEB  : %s\n", Tuner::toggle() ? "OUVERT" : "FERMÉ");
+    // Aucun Serial ici (cœur 1, chemin chaud — STALL_ANALYSIS.md §6,
+    // REVIEW_CLAUDE M14) : la trace « OUVERT / FERMÉ » est écrite par la
+    // tâche du tuner (cœur 0).
+    (void)Tuner::toggle();
     s_lastPhase = 3;
   }
   bootPrev = bootNow;

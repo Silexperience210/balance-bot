@@ -490,9 +490,10 @@ FaceFrame faceCompute() {
   // robot dont l'IMU lâche gardait un visage impassible (FINAL_REVIEW constat 6).
   if (!Balance::imuOk() || Balance::imuLost() || Balance::rateLow()) f.expr = FX_CHUTE;
   else if (Balance::isFallen())   f.expr = FX_CHUTE;
-  // Batterie faible : balance.cpp désarme dans la foulée (≤ 1 image), la teinte
-  // ne fait que marquer le coup — l'écran MANUEL affiche déjà « BAT. FAIBLE ».
-  // En aperçu web la branche n'est pas atteinte (calcul court-circuité) : assumé.
+  // Batterie faible : balance.cpp REFUSE l'armement (garde sur front montant,
+  // REVIEW_CLAUDE M6) mais ne coupe plus un robot déjà debout — la teinte rouge
+  // et l'écran « BAT. FAIBLE » sont le signal de le poser. En aperçu web la
+  // branche n'est pas atteinte (calcul court-circuité) : assumé.
   else if (g_state.batteryLow)  { f.expr = FX_MEFIANT; f.red = true; }
   else if (ar > 60.0f)            f.expr = FX_SURPRISE;
   else if (ap > 8.0f || ar > 40.0f) { f.expr = FX_ENERVE; f.red = true; }
@@ -1103,7 +1104,7 @@ void Ui::loop() {
   // Balance), pas un obstacle : l'obstacle a son propre état « OBST. ».
   int state = 0;
   if (Balance::isEnabled() && Balance::isFallen()) state = 2;
-  else if (g_state.batteryLow)   state = 5;   // armement refusé (cf. balance.cpp)
+  else if (g_state.batteryLow)   state = 5;   // armement refusé / à poser (cf. balance.cpp M6)
   else if (g_state.obstacleWarn) state = 4;
   else if (g_state.balancing)    state = 1;
   else if (Balance::isEnabled()) state = 3;

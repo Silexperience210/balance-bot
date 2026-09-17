@@ -12,7 +12,7 @@
 //                    cmdTurn    (UI) ─────► différentiel   Feet:: (position)
 //                    cascade φ  ──────────┘  (θ_ref)
 //
-// MÉCANIQUE v2 : plus de roues, deux PIEDS EN ARC sur SG90 standard.
+// MÉCANIQUE v3.1 : plus de roues, deux PIEDS EN ARC sur SG90 standard.
 // Un servo de position a un DÉBATTEMENT FINI : le PID ne peut plus
 // tourner indéfiniment. Deux mécanismes s'ajoutent donc ici :
 //   · un soft clamp qui annule la vitesse AVANT la butée ;
@@ -37,10 +37,20 @@ namespace {
 // convertie en °/s par kOutToFootDegS). Gains de départ pour un châssis
 // léger — à affiner sur le robot réel.
 //
-// Procédure de réglage (robot tenu à la main, Ki = Kd = 0) :
-//   1. monter Kp jusqu'à ce que le robot réagisse vif mais oscille ;
-//   2. monter Kd pour amortir l'oscillation (trop → tremblement aigu) ;
-//   3. monter Ki juste assez pour effacer la dérive lente / la pente.
+// Procédure de réglage (robot tenu à la main) — REVIEW_CLAUDE.md M8.
+// La sortie est une VITESSE de pied : l'accélération de la base (la seule
+// chose qui redresse le pendule) est la DÉRIVÉE de la sortie, soit
+// Ki·θ + Kp·θ̇ + Kd·θ̈. Ici Ki est donc la RAIDEUR, Kp l'AMORTISSEMENT et
+// Kd une inertie : la recette habituelle d'un PID de position (Ki = Kd = 0,
+// monter Kp jusqu'à l'oscillation) ne s'applique PAS — avec Ki = 0 aucune
+// oscillation n'est observable, le robot tombe.
+//   1. partir de Ki ≈ 400-500 (> g/R ≈ 302 s⁻², condition ci-dessous),
+//      Kp ≈ 50, Kd ≈ 0,5. Le Kp = 25 embarqué est en dessous : l'analyse
+//      linéaire du modèle du sim (retards 50 + 25 ms) le donne instable,
+//      Kp 50-100 franchement amorti ;
+//   2. monter Kp pour AMORTIR (trop bas → balancement lent qui s'amplifie,
+//      trop haut → tremblement) ;
+//   3. Kd en dernier, petit (≲ 2) : il ne fait que lisser ; trop → buzz aigu.
 //
 // Gains de DÉPART, NON validés par une simulation rejouable (voir
 // FIRMWARE_REVIEW.md §1bis) : le simulateur du dépôt modélisait un autre
@@ -50,7 +60,7 @@ namespace {
 //
 // Condition de stabilité : la commande agit en VITESSE de pied, donc le
 // terme intégral est ce qui fournit la position de pied compensant la
-// gravité. Il faut Ki > g/R ≈ 9.81 / 0.0325 ≈ 301 s⁻² pour que le point
+// gravité. Il faut Ki > g/R ≈ 9.81 / 0.0325 ≈ 302 s⁻² pour que le point
 // de contact rattrape le CoM ; en dessous, le robot tombe quelle que
 // soit la valeur de Kp. L'ancien Ki = 20 (hérité du design « roues »,
 // jamais testé) est 15× trop faible → chute systématique en sim.
@@ -58,9 +68,6 @@ namespace {
 // Balance::setGains(). Des float 32 bits sur ESP32 : lecture/écriture
 // atomiques (un seul mot machine), pas de tearing possible entre la
 // boucle d'équilibre et le serveur web — ni volatile ni mutex requis.
-// Les valeurs ci-dessous sont des gains de DÉPART, NON validés : le simulateur
-// corrigé (roulement exact + cascade) ne tient AUCUN scénario avec eux — voir
-// FIRMWARE_REVIEW.md §1bis. À régler sur le robot réel via le banc web.
 float kKp = 25.0f;   // vitesse par degré d'erreur
 float kKi = 500.0f;  // vitesse par (degré · seconde) — cf. Ki > g/R
 float kKd = 0.5f;    // vitesse par (degré / seconde) — sur le gyro
@@ -74,21 +81,34 @@ constexpr float kKdMax = 20.0f;
 // Décaler de quelques dixièmes si le robot dérive toujours du même côté.
 constexpr float kSetpointDeg = 0.0f;
 
-// ── Anti-windup ────────────────────────────────────────────────────
-// Le terme intégral est borné en unités de sortie, et gelé quand la
-// commande sature : sinon il se charge pendant une chute et renvoie le
-// robot de l'autre côté au redressement.
-constexpr float kIntegralMax = 25.0f;
-
 // ── Morts-zones ────────────────────────────────────────────────────
-// Erreur : sous ce seuil on considère le robot vertical (pas de P/I),
-// évite le tremblement permanent dû au bruit de l'IMU.
-constexpr float kErrDeadbandDeg = 0.25f;
+// Erreur : AUCUNE (0) — REVIEW_CLAUDE.md M3. L'ancienne bande de 0,25°
+// était appliquée AVANT P et I : le robot vivait sur son bord, chaque
+// sortie de bande donnait un coup de P qui le ramenait juste dedans, où P
+// et I étaient gelés ; l'erreur ne changeait donc jamais de signe,
+// l'intégrale ne se déchargeait jamais et cliquetait jusqu'à sa borne →
+// pieds en butée en 1-2 s quels que soient les gains (reproduit en sim,
+// jeu linéairement stable). Le bruit du pitch fusionné (~0,03-0,1° rms)
+// ne justifie pas de bande : le SG90 ne répond pas sous ~1° de toute
+// façon. Si une bande redevenait nécessaire, ne l'appliquer QU'AU terme
+// P, jamais à l'entrée de l'intégrateur. (Le test « < 0 » est inerte.)
+constexpr float kErrDeadbandDeg = 0.0f;
 // Sortie : plus de mort-zone ni de relèvement (shapeOutput) — c'était
 // une compensation du frottement sec des SG90 en rotation continue. En
 // commande de POSITION, ce saut 0→8 se traduirait par un bond du pied
 // de plusieurs dixièmes de degré à chaque cycle : nuisible.
 constexpr float kOutMax       = 90.0f;
+
+// ── Anti-windup ────────────────────────────────────────────────────
+// Le terme intégral est borné à la PLEINE sortie (REVIEW_CLAUDE.md M10) :
+// en commande de vitesse, I est le terme de RAIDEUR (cf. procédure de
+// réglage) ; l'ancien plafond de 25 (28 % de kOutMax) bridait
+// l'accélération cumulée de la base — mesuré en sim (mort-zone 0, retard
+// 5 ms, k_out 3, gains embarqués) : Imax 25 → 0/6, Imax 90 → θ0 = 2° tenus.
+// Le rebond au redressement (I chargé pendant la chute), lui, est déjà
+// évité par l'intégration CONDITIONNELLE de Pid::update (gel quand la
+// sortie sature).
+constexpr float kIntegralMax = kOutMax;
 
 // ── Sortie PID → vitesse de pied ───────────────────────────────────
 // Le domaine du PID (-90..+90) est lu comme des °/s de pied. À 1.0,
@@ -96,7 +116,15 @@ constexpr float kOutMax       = 90.0f;
 // 0.567 mm de déplacement au sol par degré → 51 mm/s au maximum.
 // C'est le PREMIER bouton à monter si le robot est trop lent à se
 // rattraper : un SG90 tient ~300 °/s à vide, donc jusqu'à ~3.0.
-constexpr float kOutToFootDegS = 1.0f;
+// NON-const depuis REVIEW_CLAUDE.md M11 : slider « Autorité » du banc web
+// (Balance::setOutScale, borné kOutToFootMin..Max, persisté NVS « kout »)
+// et balayé par le --sweep du sim — où aucun jeu ne tient le moindre
+// scénario sous k_out = 2, et où les tapes ne sont atteintes qu'à k_out = 3.
+// Feet:: écrête de son côté à kSpeedMaxDegS (400 °/s) : 3 × 90 = 270 °/s
+// reste dans la plage.
+float kOutToFootDegS = 1.0f;
+constexpr float kOutToFootMin = 1.0f;
+constexpr float kOutToFootMax = 3.0f;
 
 // ── Butée des pieds (débattement fini du servo de position) ────────
 // Le pied ET le corps consomment le même arc : le point de contact se
@@ -205,6 +233,16 @@ Pid   s_pid;
 bool  s_enabled   = false;
 bool  s_imuOk     = false;
 bool  s_fallen    = false;         // verrou de chute (le robot ne se débat pas)
+// REPRISE AUTOMATIQUE après s_imuLost / s_rateLow — choix documenté
+// (REVIEW_CLAUDE.md M19), comportement volontairement CONSERVÉ : les deux
+// drapeaux se relèvent SEULS dès que la cause disparaît (une trame IMU
+// repasse, la cadence revient), sans réarmement par l'utilisateur. Limite :
+// pendant la coupure les pieds sont figés (halt) et l'angle n'a plus
+// intégré le gyro ; à la reprise l'estimation reconverge sur l'accel en
+// ~0,25 s et l'état réel du robot est inconnu. Robot TENU à la main
+// (campagne de réglage) : acceptable. Robot LIBRE : pas plus sûr que
+// d'exiger un réarmement — il est probablement déjà par terre, et c'est
+// alors le verrou de chute (|θ| > kFallAngleDeg) qui prend le relais.
 bool  s_imuLost   = false;         // IMU muet : équilibre coupé jusqu'au retour
 float s_fwdSmooth = 0.0f;          // consignes UI lissées
 float s_turnSmooth= 0.0f;
@@ -244,6 +282,7 @@ void saveGains() {
   s_prefs.putFloat("kd",    kKd);
   s_prefs.putFloat("kpPhi", kRecenterKpPhi);
   s_prefs.putFloat("kv",    kRecenterKv);
+  s_prefs.putFloat("kout",  kOutToFootDegS);
 }
 
 // Coupe tout : pieds freinés SUR PLACE (surtout pas de retour au neutre,
@@ -292,15 +331,24 @@ bool recenterStep(float footAvg, float dtRec) {
 
 // Boucle INTERNE de la cascade (appelée à 200 Hz) : l'écart entre la
 // vitesse de pied voulue et celle réellement commandée devient un angle.
-// SIGNE — un setpoint POSITIF fait pencher le robot vers l'avant, ce qui
-// commande au PID des pieds une rotation vers l'ARRIÈRE (le point d'appui
-// suit le CoM). Pour RAMENER un pied parti vers l'avant (φ > 0, v_cible
-// négative), il faut donc un setpoint POSITIF : la contribution est de
-// signe opposé à (v_cible − φ̇).
-// L'ancienne formule (+kRecenterKv·(v_cible − φ̇)) donnait un setpoint
-// négatif pour un pied en avant ⇒ commande de pied vers l'AVANT ⇒ le pied
-// filait vers la butée au lieu de revenir (vérifié en simulation : pied
-// lâché à +20° → +37° en 0,3 s, puis panic).
+//
+// SIGNE NON TRANCHÉ — à décider en RÉEL (REVIEW_CLAUDE.md M1). Deux
+// arguments s'opposent :
+//   · (−), retenu ici depuis le 09/09 : un setpoint POSITIF fait pencher
+//     le robot vers l'avant, ce qui commande au PID des pieds une rotation
+//     vers l'ARRIÈRE (le point d'appui suit le CoM) ; pour RAMENER un pied
+//     parti vers l'avant (φ > 0, v_cible négative) il faudrait donc un
+//     setpoint positif, de signe opposé à (v_cible − φ̇) ;
+//   · (+), cascade de vitesse classique du pendule inversé : pour
+//     accélérer la base vers l'arrière il faut d'abord pencher vers
+//     l'arrière — le raisonnement (−) décrit le transitoire à non-minimum
+//     de phase, qui ne domine que parce que Kv·RefMax sature.
+// La « vérification en simulation » du 09/09 (pied lâché à +20° → +37°)
+// est CADUQUE : ce sim ne tenait pas le PID seul, les deux signes y
+// donnent 0/6. Le sim (sim/balancebot_sim.py, boucle interne) est ALIGNÉ
+// sur ce (−) — règle d'or — et porte le même avertissement. Premiers
+// essais : Kv = 0 au banc web (contribution nulle, garde kFootPanicDeg
+// toujours active), puis trancher le signe en réel avec Kv ≪ 1.
 inline float recenterSetpoint() {
   return constrain(-kRecenterKv * (s_recenterVel - s_footVelFilt),
                    -kRecenterRefMax, kRecenterRefMax);
@@ -364,8 +412,9 @@ bool begin() {
     kKd = constrain(s_prefs.getFloat("kd", kKd), 0.0f, kKdMax);
     kRecenterKpPhi = constrain(s_prefs.getFloat("kpPhi", kRecenterKpPhi), 0.0f, kRecenterKpPhiMax);
     kRecenterKv    = constrain(s_prefs.getFloat("kv",    kRecenterKv),    0.0f, kRecenterKvMax);
-    Serial.printf("GAINS NVS : Kp=%.1f Ki=%.0f Kd=%.2f | Kpφ=%.1f Kv=%.1f\n",
-                  kKp, kKi, kKd, kRecenterKpPhi, kRecenterKv);
+    kOutToFootDegS = constrain(s_prefs.getFloat("kout",  kOutToFootDegS), kOutToFootMin, kOutToFootMax);
+    Serial.printf("GAINS NVS : Kp=%.1f Ki=%.0f Kd=%.2f | Kpφ=%.1f Kv=%.1f | kOut=%.1f\n",
+                  kKp, kKi, kKd, kRecenterKpPhi, kRecenterKv, kOutToFootDegS);
   }
 
   // Les pieds d'abord : même sans IMU on veut les poser au repos (robot
@@ -380,8 +429,14 @@ bool begin() {
     return false;                    // → le .ino annonce « mode démo UI »
   }
 
-  // Calibration du neutre : biais gyro mesuré robot posé, immobile.
-  Imu::calibrate();
+  // Calibration du neutre : biais gyro mesuré robot posé, immobile
+  // (~2 s bloquantes, 400 vrais échantillons à 200 Hz — REVIEW_CLAUDE.md
+  // M18). Un échec (bus instable, trames figées) laisse le biais gyro à 0
+  // et l'angle amorcé par Imu::begin() : on le DIT sur le port série
+  // (setup(), pas encore le chemin chaud) sans couper l'IMU pour autant.
+  if (!Imu::calibrate()) {
+    Serial.println("IMU       : calibration ÉCHOUÉE (lectures invalides) — biais gyro laissé à 0");
+  }
   g_state.pitchDeg = Imu::pitchDeg();
   return true;
 }
@@ -418,10 +473,17 @@ void loop() {
   }
 
   bool want = isEnabled();
-  // Refus d'armer sur batterie faible : sous BAT_LOW_V la cellule est à
+  // Refus d'ARMER sur batterie faible : sous BAT_LOW_V la cellule est à
   // ~10 % et l'appel de courant des servos fait s'effondrer la tension
   // (brownout → reboot en pleine correction). On annule la demande.
-  if (want && g_state.batteryLow) {
+  // Sur le FRONT MONTANT seulement (REVIEW_CLAUDE.md M6) : testée à chaque
+  // itération, cette garde désarmait aussi un robot DEBOUT (halt() →
+  // chute) sur un seul échantillon ADC en creux. batteryLow est désormais
+  // hystérétique et débouncé (battery.cpp), et un robot déjà en équilibre
+  // n'est plus coupé : l'écran (« BAT. FAIBLE ») et le visage rouge
+  // préviennent, c'est à l'utilisateur de le poser ; le prochain armement
+  // sera refusé.
+  if (want && !s_enabled && g_state.batteryLow) {
     g_state.cmdEnabled = false;
     want = false;
   }
@@ -444,7 +506,18 @@ void loop() {
   if (!s_imuOk) {
     // Pas d'IMU : aucun équilibre possible, mais la mécanique reste
     // pilotable en démo par les flèches de l'UI.
-    halt();
+    // halt() sur FRONT seulement (REVIEW_CLAUDE.md M7) : appelé à chaque
+    // itération, il réarmait Feet::s_lastMicros (via Feet::stop()) quelques
+    // µs avant le driveFootSpeed() de demoStep(), qui voyait dt ≈ 20 µs →
+    // borné à 0,5 ms au lieu des 5 ms réels : la démo roulait 10× trop
+    // lentement. s_imuOk est figé au boot : le seul front est la première
+    // itération (un désarmement passe, lui, par le front descendant traité
+    // plus haut, qui appelle halt()).
+    static bool s_noImuHalted = false;
+    if (!s_noImuHalted) {
+      s_noImuHalted = true;
+      halt();
+    }
     demoStep();
     return;
   }
@@ -467,7 +540,9 @@ void loop() {
   // Une trame perdue (bus I2C secoué) : l'angle précédent tient. Au-delà
   // de kImuFailMax consécutives, on asservirait sur une mesure FIGÉE — on
   // coupe et on attend le retour du capteur (s_imuLost se relève seul dès
-  // qu'une trame repasse).
+  // qu'une trame repasse). Un capteur qui ACK mais renvoie des registres
+  // figés compte aussi comme « trame perdue » (imu.cpp, kFrozenMax —
+  // REVIEW_CLAUDE.md M9).
   static uint16_t s_imuFailStreak = 0;
   if (Imu::update(dt)) {
     s_imuFailStreak = 0;
@@ -651,6 +726,16 @@ void setRecenterGains(float kpPhi, float kv) {
 void getRecenterGains(float& kpPhi, float& kv) {
   kpPhi = kRecenterKpPhi;  kv = kRecenterKv;
 }
+
+// ── Autorité de sortie (°/s de pied par unité de sortie PID) ────────
+// Bornée 1-3 (REVIEW_CLAUDE.md M11) : sous 1 le robot n'a plus de quoi se
+// rattraper, au-delà de 3 on dépasse ce qu'un SG90 tient à vide.
+void setOutScale(float k) {
+  if (!isnan(k)) kOutToFootDegS = constrain(k, kOutToFootMin, kOutToFootMax);
+  saveGains();
+}
+
+float getOutScale() { return kOutToFootDegS; }
 
 float pitchRateDps() { return s_lastRateDps; }
 

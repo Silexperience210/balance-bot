@@ -1,8 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════
 // BalanceBot — module D · banc de réglage web à chaud (mode AP)
 //
-// BUT : régler Kp/Ki/Kd + la cascade de recentrage (Kpφ/Kv) et lire la
-// télémétrie depuis un téléphone, SANS recompiler ni reflasher, pendant
+// BUT : régler Kp/Ki/Kd, la cascade de recentrage (Kpφ/Kv) et l'autorité
+// de sortie (kOut, °/s de pied par unité PID — REVIEW_CLAUDE M11) et lire
+// la télémétrie depuis un téléphone, SANS recompiler ni reflasher, pendant
 // que la main tient le robot.
 //
 // La carte ouvre un point d'accès « BalanceBot-Tune », on s'y connecte
@@ -43,6 +44,7 @@ unsigned long  s_lastReqMs   = 0;
 bool           s_stationSeen = false;   // ≥1 station associée (cache 10 Hz)
 unsigned long  s_lastStationMs = 0;
 TaskHandle_t   s_task        = nullptr;
+volatile bool  s_announce    = false;   // toggle() → serverTask() trace l'état (cœur 0)
 
 // ── Démarrage / arrêt de la radio (partagés par begin() et toggle()) ──
 bool startRadio() {
@@ -54,10 +56,6 @@ bool startRadio() {
   }
   s_server.begin();
   s_up = true;
-  Serial.print("BANC WEB  : OUVERT — SSID « ");
-  Serial.print(kSsid);
-  Serial.print(" » → http://");
-  Serial.println(WiFi.softAPIP());
   return true;
 }
 
@@ -66,7 +64,21 @@ void stopRadio() {
   WiFi.mode(WIFI_OFF);                   // aucune radio qui traîne
   s_up = false;
   s_stationSeen = false;
-  Serial.println("BANC WEB  : FERMÉ (radio coupée)");
+}
+
+// Trace série de l'état de la radio. JAMAIS depuis loop() (cœur 1) : une
+// écriture USB-CDC bloque quand l'hôte ne draine pas le port
+// (STALL_ANALYSIS.md §6). Appelée depuis setup() via begin(), et depuis
+// serverTask() (cœur 0) sur demande de toggle() — REVIEW_CLAUDE M14.
+void announce() {
+  if (s_up) {
+    Serial.print("BANC WEB  : OUVERT — SSID « ");
+    Serial.print(kSsid);
+    Serial.print(" » → http://");
+    Serial.println(WiFi.softAPIP());
+  } else {
+    Serial.println("BANC WEB  : FERMÉ (radio coupée)");
+  }
 }
 
 // ── Tâche serveur (cœur 0, celui du WiFi) ───────────────────────────
@@ -76,6 +88,10 @@ void stopRadio() {
 // de temps à la boucle — au pire il retarde sa propre télémétrie.
 void serverTask(void*) {
   for (;;) {
+    if (s_announce) {                    // appui long BOOT : la trace s'écrit ICI
+      s_announce = false;
+      announce();
+    }
     if (s_up) {
       const unsigned long now = millis();
       if (now - s_lastStationMs > 100) {
@@ -122,14 +138,15 @@ button.on{background:#c0392b}
 <div class="c">
 <div class="r"><label>Kp<b id="vkp">--</b></label><input type="range" id="kp" min="0" max="100" step="0.5"></div>
 <div class="r"><label>Ki<b id="vki">--</b></label><input type="range" id="ki" min="0" max="2000" step="10"></div>
-<div class="r"><label>Kd<b id="vkd">--</b></label><input type="range" id="kd" min="0" max="10" step="0.1"></div>
+<div class="r"><label>Kd<b id="vkd">--</b></label><input type="range" id="kd" min="0" max="20" step="0.1"></div>
 <div class="r"><label>Recentre Kp&phi;<b id="vkpphi">--</b></label><input type="range" id="kpphi" min="0" max="5" step="0.1"></div>
 <div class="r"><label>Recentre Kv<b id="vkv">--</b></label><input type="range" id="kv" min="0" max="20" step="0.5"></div>
+<div class="r"><label>Autorit&eacute; kOut (&deg;/s par unit&eacute;)<b id="vkout">--</b></label><input type="range" id="kout" min="1" max="3" step="0.1"></div>
 </div>
 <button id="b">&Eacute;QUILIBRE</button>
 <div id="s">connexion&hellip;</div>
 <script>
-var E=function(i){return document.getElementById(i)},K=['kp','ki','kd','kpphi','kv'];
+var E=function(i){return document.getElementById(i)},K=['kp','ki','kd','kpphi','kv','kout'];
 var drag=0,tmr=0,bal=0,first=1;
 var FORM={method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'}};
 function post(u,b){var o={};for(var k in FORM)o[k]=FORM[k];o.body=b;return fetch(u,o)}
@@ -175,6 +192,7 @@ void handleState() {
   float kp, ki, kd, kpPhi, kv;
   Balance::getGains(kp, ki, kd);
   Balance::getRecenterGains(kpPhi, kv);
+  const float kOut = Balance::getOutScale();
   // 512 o : les 19 champs de cadence ajoutés cette nuit font ~354 o en usage
   // réel et jusqu'à ~410 o compteurs saturés — l'ancien tampon de 384 o
   // laissait 30 o de marge et aurait produit un JSON tronqué (page « hors
@@ -183,7 +201,7 @@ void handleState() {
   const int len = snprintf(buf, sizeof(buf),
            "{\"pitch\":%.1f,\"rate\":%.0f,\"footL\":%d,\"footR\":%d,"
            "\"hz\":%.0f,\"kp\":%.1f,\"ki\":%.0f,\"kd\":%.2f,"
-           "\"kpphi\":%.1f,\"kv\":%.1f,"
+           "\"kpphi\":%.1f,\"kv\":%.1f,\"kout\":%.1f,"
            "\"balancing\":%d,\"up\":%d,\"ui\":%u,\"s\":%lu,"
            "\"gap\":%u,\"gph\":%u,\"loop\":%u,\"bal\":%u,\"head\":%u,"
            "\"bat\":%u,\"stalls\":%u,\"worst\":%u,"
@@ -192,7 +210,7 @@ void handleState() {
            "\"touchmax\":%u,\"drawmax\":%u}",
            g_state.pitchDeg, Balance::pitchRateDps(),
            g_state.footLDeg, g_state.footRDeg, g_state.balanceHz,
-           kp, ki, kd, kpPhi, kv,
+           kp, ki, kd, kpPhi, kv, kOut,
            Balance::isEnabled() ? 1 : 0, g_state.balancing ? 1 : 0,
            (unsigned)g_state.dbgUiMs, millis() / 1000UL,
            (unsigned)g_state.dbgGapMs, (unsigned)g_state.dbgGapPhase,
@@ -255,11 +273,12 @@ void handleGains() {
   touchReq();
   Balance::setGains(argOrNan("kp"), argOrNan("ki"), argOrNan("kd"));
   Balance::setRecenterGains(argOrNan("kpphi"), argOrNan("kv"));
+  Balance::setOutScale(argOrNan("kout"));
   float kp, ki, kd, kpPhi, kv;
   Balance::getGains(kp, ki, kd);
   Balance::getRecenterGains(kpPhi, kv);
-  Serial.printf("TUNER : gains → Kp=%.1f Ki=%.0f Kd=%.2f | Kpφ=%.1f Kv=%.1f\n",
-                kp, ki, kd, kpPhi, kv);
+  Serial.printf("TUNER : gains → Kp=%.1f Ki=%.0f Kd=%.2f | Kpφ=%.1f Kv=%.1f | kOut=%.1f\n",
+                kp, ki, kd, kpPhi, kv, Balance::getOutScale());
   s_server.send(200, "text/plain", "ok");
 }
 
@@ -311,6 +330,7 @@ bool begin() {
     Serial.println("BANC WEB  : ÉCHEC softAP — tuner désactivé (appui long BOOT pour réessayer)");
     return false;
   }
+  announce();                            // depuis setup() : hors chemin chaud
   return true;
 }
 
@@ -325,6 +345,7 @@ void loop() {}
 bool toggle() {
   if (s_up) stopRadio();
   else      startRadio();
+  s_announce = true;                     // trace écrite par serverTask (cœur 0)
   return s_up;
 }
 

@@ -13,7 +13,8 @@ Bilan chiffré : **6 désaccords** avec `REVIEW_KIMI.md` (dont 2 affirmations «
 fausses et 1 « conséquence mesurée » non reproductible), **17 trouvailles nouvelles**
 (§4, M1-M19 hors M12/M13 qui prolongent des points de Kimi), dont **8 classées importantes**
 — 4 sur la loi de commande / la sécurité du firmware (M1, M3, M6, M8), 2 sur la stratégie
-de réglage (M10, M11), 2 sur le simulateur (M2, M4). Verdict en §6.
+de réglage (M10, M11), 2 sur le simulateur (M2, M4). Verdict en §6 ; **application des
+corrections** (état par point, compilation, sim AVANT/APRÈS) en §7.
 
 ---
 
@@ -445,3 +446,82 @@ conséquence mesurée qui ne se produit pas (D1) et deux « vérifié sain » d�
 (D2, D3). Le simulateur est le seul instrument de validation du projet : la règle d'or
 (mêmes boucles que `balance.cpp`) est aujourd'hui violée sur deux signes, et personne ne
 l'a fait tourner assez loin pour voir qu'aucune tape n'était jamais appliquée.
+
+---
+
+## 7. Application des corrections (17/09/2026 — arbre de travail, commit à venir)
+
+Périmètre appliqué : `balance-bot/` (balance.cpp, imu.cpp/h, battery.cpp/h, tuner.cpp,
+ui.cpp — commentaires seuls —, interfaces.h, .ino), `sim/balancebot_sim.py`,
+`TEST_PROTOCOL.md`, `README.md`. Rien n'a été flashé ni commité ; gains kKp/kKi/kKd
+(25/500/0,5) et structure de la loi de commande inchangés.
+
+| # | Correction | État | Où / comment |
+|---|---|---|---|
+| M1 | Signe de la boucle interne de la cascade sim ≠ firmware | **appliquée (commit à venir)** | Sim aligné sur le firmware : `-self.kv · (v_cible − φ̇)` (`sim:139`). Commentaire croisé des deux côtés (`balance.cpp` `recenterSetpoint()`, `sim` boucle interne) : « signe NON tranché — à décider en réel, commencer Kv = 0 au banc web ». Le signe n'a pas été tranché ; l'ancien commentaire « vérifié en simulation » est remplacé par le constat de caducité. |
+| M2 | Soft clamp du sim orienté à l'envers | **appliquée** | `if (-out) * self.phi_cmd > 0:` (`sim:163`), avec le raisonnement du signe en commentaire. |
+| M3 | Mort-zone d'erreur 0,25° + intégrateur = cliquet | **appliquée** | `kErrDeadbandDeg = 0.0f` (`balance.cpp`) et `DEADBAND = 0.0` (sim). Justification réécrite (bande sur P seul si jamais nécessaire). Vérifié dans le sim corrigé : Kp100/Ki500/Kd0,5, θ0 = 0,25°, cascade OFF → bande 0,25° : chute à 1,75 s avec I en butée ; bande 0 : tenu 6 s, φfin +1,6°. Idem Kp50/Ki350/Kd1 (1,52 s → OK) et Kp50/Ki500/Kd0,5 (1,59 s → OK). |
+| M5 | Physique « exacte » (couple de réaction servo omis) | **appliquée** | Équation de Lagrange dans `run()` : `θ̈·(R² + 2Rh·cosθ + h²) = g·h·sinθ − φ̈·R·(R + h·cosθ) + R·h·sinθ·θ̇²`. Docstring réécrite (dérivation, petits angles 62,0 s⁻² vs 87,2, pôle 7,87 vs 9,34 rad/s) ; le mot « EXACT » a disparu. |
+| M6 | Garde batterie = coupure en plein équilibre sur 1 échantillon | **appliquée** | `balance.cpp` : garde sur le **front montant** seulement (`want && !s_enabled && g_state.batteryLow`) — l'armement reste refusé, un robot debout n'est plus coupé. `battery.cpp` : `batteryLow` exige **3 lectures valides consécutives** < 3,5 V et retombe seulement au-dessus de **3,6 V** (hystérésis, `BAT_LOW_CLEAR_V = BAT_LOW_V + 0,1`, constantes locales — `config.h` non touché). Commentaires `interfaces.h`, `battery.h`, `ui.cpp` mis en accord (l'UI affiche toujours « BAT. FAIBLE », désormais aussi comme invitation à poser un robot debout). |
+| M7 | Démo sans IMU 10× trop lente | **appliquée** | `halt()` sur front seulement dans la branche `!s_imuOk` (drapeau statique `s_noImuHalted` ; `s_imuOk` est figé au boot, le front est la première itération). `Feet::stop()` inchangé. |
+| M8 | Procédure de réglage inapplicable (recette d'un PID de position) | **appliquée** | Commentaire `balance.cpp:40-53` réécrit pour une sortie en VITESSE : Ki = raideur (≈ 400-500 d'emblée, > g/R ≈ 302), Kp ≈ 50 = amortissement (monter Kp pour amortir), Kd = inertie, petit et en dernier. Le 301 → 302 de la condition de stabilité (9,81/0,0325 = 301,8) harmonisé. |
+| M9 | IMU figée mais ACK non détectée | **appliquée** | `imu.cpp` : `readLive()` compare la trame brute (7 int16) à la précédente ; au-delà de `kFrozenMax = 4` trames strictement identiques consécutives, `update()` renvoie `false` → alimente `s_imuFailStreak`/`kImuFailMax` de `balance.cpp` (coupure à 24 trames ≈ 120 ms). Seuil > 1 parce que la cadence millis() du .ino peut relire le même échantillon (lecture < 5 ms après la précédente). Réinitialisé dans `begin()`. |
+| M10 | `kIntegralMax = 25` plafonne le terme de raideur | **appliquée** | `kIntegralMax = kOutMax` (bloc anti-windup déplacé après `kOutMax`), `INTEGRAL_MAX = OUT_MAX` dans le sim. Le rebond au redressement reste géré par l'intégration conditionnelle. Effet mesuré (gains embarqués, k_out 3, Kv 0) : panic à 1,13 s (Imax 25) → 1,65 s (Imax 90). |
+| M11 | `kOutToFootDegS` constexpr, jamais balayé | **appliquée** | Firmware : `float kOutToFootDegS` borné `kOutToFootMin..Max` = 1..3, API `Balance::setOutScale()/getOutScale()` (ajout non intrusif dans `interfaces.h`), clé NVS « kout » (écriture dans `saveGains()`, relecture bornée dans `begin()`), slider « Autorité kOut » 1-3 pas 0,1 sur la page web + champ `kout` dans `/api/state` et `/api/gains` (tampon 512 o : +11 o, marge conservée). Sim : paramètre `k_out` de `Sim` appliqué à la commande physique (`u = −ctrl()·k_out`) ET à l'estimateur φ̇ ; `--sweep` balaie k_out ∈ {1, 2, 3} ; 4ᵉ argument positionnel `k_out` en CLI. |
+| M13 | Restes cosmétiques | **appliquée** | « v2 » → « v3.1 » (`balance.cpp:15`, `interfaces.h:61`) ; commentaire `Tuner::loop()` (`interfaces.h:86`) ; `FIT_NOTES §9` → `chassis/NOTES_v3.md, § Montage` (`TEST_PROTOCOL.md:12`) ; `README.md:19` → « châssis v3.1 : gen_bitcoin_bot.py + STL (v3/) + NOTES_v3.md » (gen_chassis.py n'existe pas non plus) ; paraphrase `balance.cpp:61-63` supprimée, §45-49 conservé. |
+| M14 | `Serial.printf` dans `loop()` cœur 1 sur appui long | **appliquée (élargie)** | `.ino:133` : plus aucun `Serial` — `(void)Tuner::toggle()`. Comme `startRadio()`/`stopRadio()` écrivaient aussi sur Serial depuis ce même chemin, leurs traces sont regroupées dans `announce()`, appelée depuis `begin()` (setup) et, sur `toggle()`, par la tâche serveur (cœur 0) via un drapeau `volatile s_announce`. La trace « BANC WEB : OUVERT/FERMÉ » est conservée, hors du chemin chaud. |
+| M15 | Slider Kd borné à 10 vs `kKdMax = 20` | **appliquée** | `max="20"` (`tuner.cpp`). |
+| M16 | Réarmement sans recentrage → panique si pieds > ~25° | **appliquée (doc seule)** | Paragraphe ajouté à `TEST_PROTOCOL.md` §5 : symptôme (« CHUTE » robot debout), cause (aucun `recenterNow()` à l'armement), consigne (MANUEL, ramener les pieds vers 0 aux flèches, `P:` ≈ 0). Comportement inchangé. |
+| M17 | Ce que le sim ne modélise pas | **appliquée** | Docstring du sim : trame PWM 50 Hz (0-20 ms, échantillonneur-bloqueur), mort-zone SG90 (~5-10 µs ≈ 0,5-1°), pas de borne d'accélération, friction/3D/masse des pieds, retard forfaitaire 25 ms. Le commentaire faux de `tau_f` (« filtre complémentaire 0,25 s », §2 #9) est remplacé par « retard total de boucle, non justifié finement, le verdict en dépend » — valeur inchangée. |
+| M18 | `Imu::calibrate()` : retour ignoré, 400 lectures = 60 échantillons | **appliquée** | `balance.cpp` : `if (!Imu::calibrate()) Serial.println(…)` (setup, hors chemin chaud), IMU conservée. `imu.cpp` : `delay(5)` entre lectures (≈ 200 Hz → 400 échantillons distincts en ~2,2 s), lectures via `readLive()` (les trames figées ne comptent pas). Commentaire `imu.h` : « ~300 ms » → « ~2 s ». |
+| M19 | Reprise automatique après imuLost/rateLow | **appliquée (commentaire seul, rien changé)** | Bloc de commentaire à la déclaration de `s_imuLost`/`s_rateLow` : choix documenté, limite robot libre vs tenu, relais par le verrou de chute. |
+
+Non retenu / hors liste (signalé, pas modifié) :
+- **§2 #7 / M12 — throttling NVS qui saute l'écriture** : non demandé, non modifié. Conséquence
+  à connaître : dans `handleGains()`, `setGains` → `setRecenterGains` → `setOutScale`
+  appellent chacun `saveGains()` ; seul le premier écrit (fenêtre 1,5 s), donc Kpφ/Kv et
+  désormais kOut ne sont persistés qu'au POST **suivant** (valeurs déjà en RAM). Fix
+  recommandé inchangé : drapeau dirty + écriture au désarmement.
+- **§2 #9 — valeur de `tau_f`** : commentaire corrigé (M17), valeur 25 ms conservée (pas dans
+  la liste ; le verdict du sim en dépend, c'est écrit dans la docstring).
+- `README.md:35` (« Gains validés par simulation ») et `TEST_PROTOCOL.md:3-4` (« gains
+  sim-validés ») restent **faux** au vu de §1 #5 / M4 — hors de la liste « renvois périmés »,
+  non touchés. À corriger par l'orchestrateur avec le prochain flash.
+- `TEST_PROTOCOL.md` §4 et le tableau « Réglages rapides » gardent la logique « position »
+  (buzz → ↓Kp ↑Kd) contredite par M8 ; non listés, non touchés.
+
+### Compilation (sans upload)
+
+`arduino-cli compile --fqbn esp32:esp32:esp32s3:USBMode=hwcdc,FlashSize=16M,PSRAM=opi`
++ les defines de `build.sh` (170×320, ST7789) : **0 erreur**, 1 046 902 o de flash (79 %),
+50 916 o de RAM (15 %). Recompilation complète séparée (`--build-path /tmp`, `-Wall -Wextra`
+effectifs) : **aucun avertissement dans les fichiers modifiés** ; seuls subsistent 3
+`-Wformat-truncation` préexistants dans `ui.cpp:1057/1091/1150` (non touchés).
+
+### Simulateur — AVANT / APRÈS (gains embarqués Kp25/Ki500/Kd0,5, `random.seed(42)`)
+
+| Variante | AVANT (`2c64860`) | APRÈS (M1 M2 M3 M5 M10 M11) |
+|---|---|---|
+| défaut (cascade ON, Kv 3, k_out 1) | **0/6** — panic φ @0,41 s ×5, chute θ @0,35 s | **0/6** — chute θ @0,39-0,49 s ×6 |
+| `--no-cascade` | **0/6** — chute θ @0,35-0,54 s | **0/6** — chute θ @0,43-0,90 s |
+| k_out 3, Kv 0 (cascade neutralisée) | n/a (k_out non réglable) | **0/6** — panic φ @1,65 s (θ0 = 2°), 0,93 s (tapes) |
+| `--sweep` (280 jeux × k_out {1,2,3}, 6/6 exigé) | 0 jeu (280 jeux, k_out 1 seul) | **0 jeu** (cascade Kv 3 : 280 × 3 à 0/6 ; `--no-cascade` : 0 jeu à 6/6) |
+
+Tapes (poussée à t = 3 s) : avec les gains embarqués **aucune tape n'est atteinte**, avant
+comme après (chute avant 0,5 s ; 1,65 s au mieux). Elles ne le sont que dans le balayage
+étendu, **k_out = 3 et cascade neutralisée** (Kv = 0 ou `--no-cascade`) : meilleur jeu
+2/6 avec les **3 tapes atteintes**, par ex. Kp25/Ki350/Kd1 → θ0 = 2° tenus 6 s (φfin +10°/−5°),
+tapes → panic φ **0,1-0,2 s après la poussée** (3,10-3,20 s) : 0,4 rad/s consomme déjà les
+±25 mm de course, ce que le protocole annonçait déjà comme limite physique. Histogramme
+du balayage (Kv 0) : k_out 1 → 280 jeux à 0/6 ; k_out 2 → 13 jeux à 2/6 ; k_out 3 → 26 jeux
+à 2/6. Avec la cascade à Kv = 3, **tout** panique φ en 0,2-0,4 s quel que soit k_out
+(saturation Kv·RefMax, cf. M4-4) — la recommandation « Kv = 0 au banc » tient.
+
+Lecture : les corrections n'améliorent pas le compte 6/6 des gains embarqués (le retard
+forfaitaire de 25 ms les rend linéairement instables, §2 #9) ; elles changent ce que le
+sim mesure : (i) les tapes deviennent atteignables (k_out 3), (ii) le cliquet de la
+mort-zone est éliminé sur les jeux stables (M3, vérifié ci-dessus), (iii) le plafond
+intégral n'écrête plus la raideur (M10 : 1,13 s → 1,65 s avant panic), (iv) le sim et le
+firmware ont enfin les mêmes signes (M1, M2) et une physique de 19 % moins pessimiste
+(M5). Le prochain pas côté sim n'est pas une recherche de gains mais la justification de
+`tau_f` et la modélisation de la trame 50 Hz (M17).

@@ -9,7 +9,7 @@ sim-validés Kp25/Ki500/Kd0.5). À faire dans l'ordre, SANS brûler d'étapes.
 - [ ] **Alimentation séparée 5-6V pour les servos** (Lot 3) : les servos ne
       doivent JAMAIS tirer sur le 3V3/5V de la carte → brownout → reboot.
       Minimum : power bank 5V + GND commun. Même pour un seul servo.
-- [ ] 2× SG90 + 2× foot_arc imprimés, palonnier calé (FIT_NOTES §9)
+- [ ] 2× SG90 + 2× foot_arc imprimés, palonnier calé (chassis/NOTES_v3.md, § Montage)
 - [ ] MPU6050 monté sur son piédestal (fils fixes, plus de duponts volants)
 - [ ] Table lisse, dégagée, ~1 m² — et un matelas/oreiller derrière le robot
       pour les premières chutes (elles arriveront)
@@ -75,7 +75,19 @@ debout mais dérive et finit en butée — c'est normal). Ensuite seulement,
 monter Kv à 1 puis 3, et Kpφ à 0.4 puis 0.8. Raison : `Kv·(v_cible − φ̇)` est
 borné à ±6°, soit autant que le plein gaz des flèches — à Kv = 3 il sature
 dès 2 °/s d'écart de vitesse et peut injecter une assiette de consigne en
-créneau. Ce point n'a jamais tourné sur du matériel réel.
+créneau. Ce point n'a jamais tourné sur du matériel réel, et le **signe** de
+la boucle interne n'est pas tranché (REVIEW_CLAUDE.md M1) : Kv = 0 d'abord.
+
+**Réarmement après un STOP — sans recentrage (à connaître, REVIEW_CLAUDE.md
+M16)** : après STOP, les pieds restent où ils étaient (voulu : un retour au
+neutre ferait basculer un robot debout). À l'armement suivant, aucun
+recentrage automatique n'a lieu — seul le chemin « chute, puis 700 ms tenu
+droit » ramène les pieds à 0. Si les pieds ont été laissés au-delà de ~25°, le
+premier transitoire franchit la garde `kFootPanicDeg = 35°` et l'écran affiche
+« CHUTE » alors que le robot est debout. **Avant d'armer : passer en MANUEL et
+ramener les pieds vers 0 aux flèches** (l'écran `P:` doit lire ~0 ; au-delà de
+±15° la démo n'autorise que le retour vers 0). Comportement inchangé,
+documenté ici.
 
 ## Réglages rapides (constantes, balance.cpp)
 | Symptôme | Constante |
