@@ -85,10 +85,49 @@
     sim.setNoise(+champs.noise.input.value);
   }
 
+  // ── JEUX DE GAINS ────────────────────────────────────────────────────
+  // `embarques` = ce qui est FLASHÉ dans le firmware : il TOMBE (0/6 scénarios
+  // mesurés) — c'est le constat de FIRMWARE_REVIEW.md §1bis, la raison même de
+  // la campagne de réglage. `tient` = meilleur jeu trouvé au banc (5/6), la
+  // cascade étant neutralisée (Kv = 0 : à Kv = 3 elle sature et fait tomber).
+  var JEUX = {
+    tient: {
+      nom: "jeu qui TIENT (5/6 · Kv=0)",
+      gains: { kp: 25, ki: 350, kd: 1, kpPhi: 0.8, kv: 0, kOut: 3 }
+    },
+    embarques: {
+      nom: "gains EMBARQUÉS (il tombe)",
+      gains: { kp: 25, ki: 500, kd: 0.5, kpPhi: 0.8, kv: 3, kOut: 1 }
+    }
+  };
+  var jeuCourant = "tient";        // on ouvre sur un robot qui TIENT
+
+  function appliqueJeu(nom) {
+    var j = JEUX[nom];
+    if (!j) return;
+    jeuCourant = nom;
+    Object.keys(j.gains).forEach(function (k) {
+      if (!champs[k]) return;
+      champs[k].input.value = j.gains[k];
+      champs[k].val.textContent = (+j.gains[k]).toFixed(2);
+    });
+    pousseReglages();
+  }
+
   function construitReglages() {
     var conteneur = document.getElementById("reglages");
+    // Sélecteur de jeu de gains (au-dessus des sliders)
+    var ligJ = document.createElement("div");
+    ligJ.className = "reglage";
+    ligJ.innerHTML = "<label>Jeu de gains</label><select id='sel-jeu'>" +
+      Object.keys(JEUX).map(function (k) {
+        return "<option value='" + k + "'>" + JEUX[k].nom + "</option>";
+      }).join("") + "</select>";
+    conteneur.appendChild(ligJ);
+
     REGLAGES.forEach(function (r) {
-      var def = BE.defaults[r.cle];
+      var def = JEUX[jeuCourant].gains[r.cle];
+      if (def === undefined) def = BE.defaults[r.cle];
       var ligne = document.createElement("div");
       ligne.className = "reglage";
       ligne.innerHTML =
@@ -114,6 +153,10 @@
     cb.checked = !!BE.defaults.cascade;
     cb.addEventListener("change", pousseReglages);
     conteneur.appendChild(ligC);
+
+    var selJeu = document.getElementById("sel-jeu");
+    selJeu.value = jeuCourant;
+    selJeu.addEventListener("change", function () { appliqueJeu(this.value); });
   }
 
   // ======================================================================
