@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>BalanceBot — Simulateur web 3D</title>
+<style>
+  /* ---- Thème sombre, accent orange (couleur produit) ---- */
+  :root {
+    --fond: #14161a;
+    --panneau: #1d2026;
+    --bord: #2c313a;
+    --texte: #d7dae0;
+    --texte-dim: #8a919c;
+    --orange: #f7931a;
+    --rouge: #e0533d;
+    --vert: #5bbf6a;
+    --jaune: #d9b23c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 12px;
+    background: var(--fond); color: var(--texte);
+    font: 14px/1.4 system-ui, sans-serif;
+  }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  h1 .accent { color: var(--orange); }
+  h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--texte-dim); margin: 14px 0 6px;
+  }
+  #layout { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+  #gauche { flex: 1 1 520px; min-width: 380px; }
+  #droite { flex: 0 1 340px; min-width: 300px; }
+  /* Conteneur de la vue 3D : le canvas WebGL est inséré dedans par ui.js */
+  #vue3d {
+    position: relative;
+    width: 100%; height: 480px;
+    background: var(--panneau); border: 1px solid var(--bord); border-radius: 6px;
+    overflow: hidden;
+  }
+  #vue3d canvas { display: block; }
+  #aide-cam {
+    position: absolute; right: 8px; bottom: 6px;
+    color: var(--texte-dim); font-size: 11px; pointer-events: none;
+  }
+  #overlay-verdict {
+    position: absolute; left: 10px; top: 8px;
+    font-size: 15px; font-weight: 700; letter-spacing: .04em;
+    pointer-events: none; display: none;
+  }
+  #overlay-verdict.ok      { color: var(--vert); }
+  #overlay-verdict.chute   { color: var(--rouge); }
+  #overlay-verdict.panique { color: var(--jaune); }
+  .panneau {
+    background: var(--panneau); border: 1px solid var(--bord);
+    border-radius: 6px; padding: 10px 12px; margin-bottom: 12px;
+  }
+  /* ---- Boutons ---- */
+  button {
+    background: #262b33; color: var(--texte);
+    border: 1px solid var(--bord); border-radius: 5px;
+    padding: 6px 12px; cursor: pointer; font-size: 13px;
+  }
+  button:hover { border-color: var(--orange); }
+  button.actif { background: var(--orange); color: #14161a; font-weight: 600; }
+  #boutons-marche button { margin-right: 6px; }
+  #vitesses button { margin-right: 6px; }
+  #scenarios button { margin: 2px 4px 2px 0; }
+  /* ---- Sliders ---- */
+  .reglage { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .reglage label { flex: 0 0 70px; color: var(--texte-dim); }
+  .reglage input[type=range] { flex: 1; accent-color: var(--orange); }
+  .reglage .val { flex: 0 0 56px; text-align: right; font-variant-numeric: tabular-nums; }
+  .reglage input[type=checkbox] { accent-color: var(--orange); }
+  /* ---- Télémétrie ---- */
+  #telemetrie { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font-variant-numeric: tabular-nums; }
+  #telemetrie .nom { color: var(--texte-dim); }
+  #verdict.ok     { color: var(--vert); font-weight: 600; }
+  #verdict.chute  { color: var(--rouge); font-weight: 600; }
+  #verdict.panique{ color: var(--jaune); font-weight: 600; }
+  #verdict.encours{ color: var(--texte-dim); }
+  /* ---- Éditeur ---- */
+  textarea#editeur {
+    width: 100%; height: 260px; resize: vertical;
+    background: #101318; color: var(--texte);
+    border: 1px solid var(--bord); border-radius: 5px;
+    font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace;
+    padding: 8px; tab-size: 2;
+  }
+  #erreur-editeur {
+    color: var(--rouge); font: 12px ui-monospace, monospace;
+    white-space: pre-wrap; margin-top: 6px; min-height: 1em;
+  }
+  #msg-moteur {
+    color: var(--rouge); font-weight: 600; padding: 8px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+  <h1><span class="accent">BalanceBot</span> — simulateur web 3D</h1>
+
+  <!-- Bandeau affiché si engine.js est absent (contrat window.BalanceEngine) -->
+  <div id="msg-moteur">⚠ <code>engine.js</code> introuvable ou invalide :
+    <code>window.BalanceEngine</code> n'est pas défini. La simulation ne peut pas démarrer.</div>
+
+  <div id="layout">
+    <div id="gauche">
+      <!-- Vue 3D (Three.js) : remplie par ui.js -->
+      <div id="vue3d">
+        <div id="overlay-verdict"></div>
+        <div id="aide-cam">glisser : orbite · molette : zoom · clic droit : pan</div>
+      </div>
+
+      <div class="panneau">
+        <h2>Effets secondaires (hook moteur)</h2>
+        <textarea id="editeur" spellcheck="false"></textarea>
+        <div style="margin-top:6px">
+          <button id="btn-appliquer">Appliquer</button>
+          <button id="btn-reinit-code">Réinitialiser le code</button>
+        </div>
+        <div id="erreur-editeur"></div>
+      </div>
+    </div>
+
+    <div id="droite">
+      <div class="panneau">
+        <h2>Marche</h2>
+        <div id="boutons-marche">
+          <button id="btn-run">RUN</button>
+          <button id="btn-pause">PAUSE</button>
+          <button id="btn-reset">RESET</button>
+        </div>
+        <h2>Vitesse de lecture</h2>
+        <div id="vitesses">
+          <button data-v="0.5">0,5×</button>
+          <button data-v="1" class="actif">1×</button>
+          <button data-v="2">2×</button>
+        </div>
+        <h2>Scénarios</h2>
+        <div id="scenarios"><!-- rempli par ui.js depuis BalanceEngine.scenarios --></div>
+      </div>
+
+      <div class="panneau">
+        <h2>Réglages</h2>
+        <div id="reglages"><!-- rempli par ui.js depuis BalanceEngine.defaults --></div>
+      </div>
+
+      <div class="panneau">
+        <h2>Télémétrie</h2>
+        <div id="telemetrie">
+          <span class="nom">θ (corps)</span>      <span id="t-theta">—</span>
+          <span class="nom">φ (pied)</span>       <span id="t-phi">—</span>
+          <span class="nom">Sortie PID</span>     <span id="t-pid">—</span>
+          <span class="nom">Intégrale</span>      <span id="t-integ">—</span>
+          <span class="nom">Verdict</span>        <span id="verdict" class="encours">—</span>
+          <span class="nom">Temps simulé</span>   <span id="t-temps">—</span>
+          <span class="nom">Vitesse</span>        <span id="t-vitesse">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Libs locales (UMD, pas de module ES, pas de CDN) -->
+  <script src="lib/three.min.js"></script>
+  <script src="lib/OrbitControls.js"></script>
+  <!-- Ordre garanti : le moteur d'abord, le viewer ensuite -->
+  <script src="engine.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
