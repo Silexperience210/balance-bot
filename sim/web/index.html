@@ -164,8 +164,9 @@
   <!-- Libs locales (UMD, pas de module ES, pas de CDN) -->
   <script src="lib/three.min.js"></script>
   <script src="lib/OrbitControls.js"></script>
-  <!-- Ordre garanti : le moteur d'abord, le viewer ensuite -->
+  <!-- Ordre garanti : le moteur d'abord, les pièces 3D (générées, base64), le viewer ensuite -->
   <script src="engine.js"></script>
+  <script src="parts.js"></script>
   <script src="ui.js"></script>
 </body>
 </html>

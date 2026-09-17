@@ -4,15 +4,22 @@
 
    CONVENTION DE REPÈRE 3D (rendu)
    -------------------------------
-   - Y = verticale (haut), X = direction d'avance/roulement, Z = axe transverse.
-   - Le pitch θ est une rotation autour de l'axe Z du monde.
+   Les pièces (parts.js, généré par chassis/assets/exporter_parts_web.py) sont
+   les VRAIS STL du châssis, convertis du repère design Blender (Z-up :
+   X = voie gauche→droite, Y = arrière→avant, Z = haut, sol z = 0) vers le
+   repère Three.js Y-up par permutation cyclique (déterminant +1) :
+       x_three = y_design  (avance / roulement)
+       y_three = z_design  (verticale)
+       z_three = x_design  (axe transverse = axe des ROUES = axe de tangage)
+   Origine robot : point central de l'axe des roues — le groupe `robot` est
+   posé à y = R (hauteur de l'axe) et tout pivote autour de l'axe Z local.
+   - Le pitch θ est une rotation autour de l'axe Z.
    - Signe : θ > 0 → le corps penche vers +X et l'ensemble roule vers +X.
      En Three.js (rotation anti-horaire autour de +Z), cela donne :
        corps  .rotation.z = −θ(rad)
-       pieds  .rotation.z = −(θ + φ)(rad)   (l'arc roule, φ est l'angle servo imposé)
+       roues  .rotation.z = −(θ + φ)(rad)   (spin des roues, φ = angle servo)
    - Roulement sans glissement (cohérent avec le Lagrange du contrat) :
-       x_centre_arc = R · (θ + φ)   (R = rayon de l'arc, angles en radians)
-   - Le centre de l'arc est à hauteur R au-dessus du sol (y = 0).
+       x_centre = R · (θ + φ)   (R = 41,5 mm = rayon de roulement WHEEL_R)
    - θ et φ viennent STRICTEMENT de sim.state (degrés → radians ici). */
 (function () {
   "use strict";
@@ -33,9 +40,9 @@
   }
   var BE = window.BalanceEngine;
 
-  // Constantes géométriques du contrat (rendu uniquement — pas de physique ici)
-  var R = 0.0325;   // rayon des pieds-arcs (m)
-  var H = 0.080;    // hauteur du centre de masse au-dessus du centre d'arc (m)
+  // Constante géométrique du rendu (pas de physique ici) : rayon de roulement
+  // WHEEL_R = 41,5 mm (gen_bitcoin_bot.py) — l'axe des roues est à 41,5 mm du sol.
+  var R = 0.0415;
 
   // ---- État du viewer ----
   var sim = BE.create(BE.defaults);
@@ -232,7 +239,7 @@
   camera.position.set(0.34, 0.20, 0.38);           // trois-quarts devant
 
   var controles = new THREE.OrbitControls(camera, renderer.domElement);
-  controles.target.set(0, 0.085, 0);               // point d'équilibre (centre d'arc + corps)
+  controles.target.set(0, 0.10, 0);                // mi-hauteur du corps ₿ (201 mm, axe à 41,5 mm)
   controles.enableDamping = true;
   controles.dampingFactor = 0.08;
   controles.minDistance = 0.10;
@@ -270,85 +277,68 @@
   grille.material.opacity = 0.55;
   scene.add(grille);
 
-  // ---- Matériaux du robot ----
-  var matCorps = new THREE.MeshStandardMaterial({
-    color: 0xf7931a, metalness: 0.55, roughness: 0.32   // orange métallisé produit
+  // ---- Matériaux : fidèles à chassis/assets/vue_eclatee.py ----
+  // Coques : ORANGE du PRODUIT — la fonction d'assemblage RÉELLE de
+  // gen_bitcoin_bot.py utilise `orange` (0.97, 0.58, 0.10). La vue éclatée
+  // (vue_eclatee.py) peignait les coques en PETG doré : c'est un matériau de
+  // vue éclatée, pas celui du produit.
+  var matCoque = new THREE.MeshStandardMaterial({
+    color: 0xff9d2e, metalness: 0.30, roughness: 0.36
   });
-  var matPied = new THREE.MeshStandardMaterial({
-    color: 0xc9ced6, metalness: 0.85, roughness: 0.28   // acier clair
+  // Roues : `dark` (0.10, 0.10, 0.11) dans l'assemblage réel — noir métallisé.
+  var matRoue = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1c, metalness: 0.55, roughness: 0.42
   });
-  var matMoyeu = new THREE.MeshStandardMaterial({
-    color: 0x565d68, metalness: 0.7, roughness: 0.4
-  });
-  var matVisiere = new THREE.MeshStandardMaterial({
-    color: 0x10141a, metalness: 0.2, roughness: 0.12    // écran/visière sombre brillante
+  // MAT_TPU (0.20, 0.20, 0.22) : bande de roulement TPU sombre
+  var matTPU = new THREE.MeshStandardMaterial({
+    color: 0x292929, metalness: 0.0, roughness: 0.9
   });
 
-  // ---- Corps : plaque arrondie extrudée, dressée verticalement ----
-  // Shape dans le plan XY, base à y = 0 (au centre de l'arc), extrusion selon Z.
-  function formePlaqueArrondie(largeur, hauteur, rayon) {
-    var s = new THREE.Shape();
-    var x0 = -largeur / 2, x1 = largeur / 2;
-    s.moveTo(x0 + rayon, 0);
-    s.lineTo(x1 - rayon, 0);
-    s.quadraticCurveTo(x1, 0, x1, rayon);
-    s.lineTo(x1, hauteur - rayon);
-    s.quadraticCurveTo(x1, hauteur, x1 - rayon, hauteur);
-    s.lineTo(x0 + rayon, hauteur);
-    s.quadraticCurveTo(x0, hauteur, x0, hauteur - rayon);
-    s.lineTo(x0, rayon);
-    s.quadraticCurveTo(x0, 0, x0 + rayon, 0);
-    return s;
+  // ---- Pièces réelles du châssis : parts.js (base64, généré par
+  //      chassis/assets/exporter_parts_web.py — voir son en-tête pour le repère) ----
+  var PIECES = window.BALANCEBOT_PARTS ? window.BALANCEBOT_PARTS.pieces : null;
+  if (!PIECES) {
+    var msgPieces = document.getElementById("msg-moteur");
+    msgPieces.textContent = "⚠ parts.js introuvable ou invalide : régénère-le avec" +
+      " chassis/assets/exporter_parts_web.py.";
+    msgPieces.style.display = "block";
+    return;
   }
 
-  var L_CORPS = 0.056;      // largeur (selon X)
-  var H_CORPS = 0.182;      // hauteur totale (~20 cm réel ramené à l'échelle du modèle)
-  var P_CORPS = 0.042;      // profondeur (selon Z)
-  var geoCorps = new THREE.ExtrudeGeometry(formePlaqueArrondie(L_CORPS, H_CORPS, 0.012), {
-    depth: P_CORPS, bevelEnabled: true,
-    bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 2, curveSegments: 16
-  });
-  geoCorps.translate(0, 0.006, -P_CORPS / 2);   // base légèrement au-dessus du centre d'arc
-  var corps = new THREE.Mesh(geoCorps, matCorps);
-  corps.castShadow = true;
+  function decodeB64(b64) {
+    var bin = atob(b64), n = bin.length, oct = new Uint8Array(n);
+    for (var i = 0; i < n; i++) oct[i] = bin.charCodeAt(i);
+    return oct.buffer;
+  }
 
-  // Visière/écran sur la face avant (+X), repère visuel de l'avant
-  var visiere = new THREE.Mesh(new THREE.BoxGeometry(0.0035, 0.024, 0.034), matVisiere);
-  visiere.position.set(L_CORPS / 2 + 0.0032, 0.150, 0);
-  corps.add(visiere);
+  function meshPiece(id, mat) {
+    var p = PIECES[id];
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute("position",
+      new THREE.BufferAttribute(new Float32Array(decodeB64(p.positions)), 3));
+    geo.setIndex(new THREE.BufferAttribute(new Uint32Array(decodeB64(p.indices)), 1));
+    geo.computeVertexNormals();
+    var m = new THREE.Mesh(geo, mat);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    return m;
+  }
 
-  // ---- Pieds : deux arcs de cercle (torus partiels) + moyeu ----
-  // TorusGeometry : cercle dans le plan XY autour de Z — exactement le plan de roulement.
-  var PORTEE_ARC = 120 * DEG;    // portée angulaire affichée de chaque pied
-  var geoPied = new THREE.TorusGeometry(R, 0.0035, 12, 48, PORTEE_ARC);
-  // Le torus démarre à +X ; on le recentre pour que l'arc soit centré sous le corps (−Y).
-  geoPied.rotateZ(-Math.PI / 2 - PORTEE_ARC / 2);
-
-  var piedGauche = new THREE.Mesh(geoPied, matPied);
-  piedGauche.position.z = +0.026;
-  piedGauche.castShadow = true;
-  var piedDroit = new THREE.Mesh(geoPied, matPied);
-  piedDroit.position.z = -0.026;
-  piedDroit.castShadow = true;
-
-  // Moyeu : cylindre le long de Z reliant les deux pieds au centre de l'arc
-  var geoMoyeu = new THREE.CylinderGeometry(0.006, 0.006, 0.058, 20);
-  geoMoyeu.rotateX(Math.PI / 2);   // axe du cylindre : Y → Z
-  var moyeu = new THREE.Mesh(geoMoyeu, matMoyeu);
-  moyeu.castShadow = true;
-
-  // ---- Hiérarchie : robot (roulement) > corps (θ) / pieds (θ+φ) ----
-  var groupeCorps = new THREE.Group();   // pivote de θ autour du centre de l'arc
-  groupeCorps.add(corps);
-  var groupePieds = new THREE.Group();   // pivote de θ+φ (roulement + servo)
-  groupePieds.add(piedGauche);
-  groupePieds.add(piedDroit);
-  groupePieds.add(moyeu);
+  // ---- Hiérarchie : robot (roulement) > corps (θ) / roues (θ+φ) ----
+  // L'axe de tangage = axe des roues = axe Z passant par l'origine de `robot`.
+  var groupeCorps = new THREE.Group();   // pivote de θ (les 2 coques ₿)
+  groupeCorps.add(meshPiece("b_front", matCoque));
+  groupeCorps.add(meshPiece("b_back", matCoque));
+  var groupePieds = new THREE.Group();   // pivote de θ+φ (roues ₿ + bandes TPU)
+  groupePieds.add(meshPiece("roue_D", matRoue));
+  groupePieds.add(meshPiece("roue_G", matRoue));
+  groupePieds.add(meshPiece("pneu_D", matTPU));
+  groupePieds.add(meshPiece("pneu_G", matTPU));
 
   var robot = new THREE.Group();
   robot.add(groupeCorps);
   robot.add(groupePieds);
-  robot.position.y = R;                  // centre de l'arc à hauteur R du sol
+  robot.position.y = R;                  // axe des roues à hauteur R du sol
   scene.add(robot);
 
   // Met à jour les poses depuis l'état du moteur (degrés → radians).
@@ -357,10 +347,10 @@
     var th = s.theta * DEG;
     var ph = s.phi * DEG;
     groupeCorps.rotation.z = -th;              // θ > 0 → penche vers +X
-    groupePieds.rotation.z = -(th + ph);       // roulement de l'arc + angle servo φ
+    groupePieds.rotation.z = -(th + ph);       // spin des roues (roulement + servo φ)
     robot.position.x = R * (th + ph);          // roulement sans glissement
     // Chute : lueur rouge discrète du corps
-    matCorps.emissive.setHex(s.fallen ? 0x4a1208 : 0x000000);
+    matCoque.emissive.setHex(s.fallen ? 0x4a1208 : 0x000000);
   }
 
   // Redimensionnement du renderer selon le conteneur (vérifié à chaque frame)
