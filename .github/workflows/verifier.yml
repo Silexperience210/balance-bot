@@ -1,0 +1,80 @@
+name: Vérifications
+
+# À chaque poussée : la règle d'or du projet (simulateur et firmware d'accord), l'auto-test
+# du simulateur + le bundle mono-fichier régénérable, et la compilation du firmware.
+# La règle d'or n'est plus une intention : si quelqu'un change une constante d'un seul
+# côté, la CI passe au rouge.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  regle-or:
+    name: Règle d'or (simulateur ↔ firmware)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Comparer les constantes du firmware et des simulateurs
+        run: python3 scripts/verifier-regle-or.py
+
+  simulateur:
+    name: Simulateur (auto-test + bundle)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Auto-test du moteur
+        run: node sim/web/selfcheck.js
+      - name: Le bundle mono-fichier est-il à jour ?
+        run: |
+          set -e
+          # L'emballeur écrit à côté de ses sources (sim/web/, ignoré par git) ; le fichier
+          # publié à la racine doit être sa copie exacte. S'ils diffèrent, quelqu'un a touché
+          # au simulateur sans régénérer le bundle que sert GitHub Pages.
+          python3 chassis/assets/emballer_simulateur.py
+          cmp sim/web/simulateur-balancebot.html simulateur.html \
+            && echo "Bundle identique." \
+            || { echo "::error::simulateur.html n'est pas à jour — relance l'emballeur et commite le résultat."; exit 1; }
+      - name: Aucune ressource externe (le simulateur doit tourner hors ligne)
+        run: |
+          if grep -qE '<script src=|<link |@import|fetch\(|XMLHttpRequest|import\(' simulateur.html; then
+            echo "::error::le simulateur embarque une ressource externe : il ne marcherait pas en file://"
+            exit 1
+          fi
+          echo "Aucune ressource externe."
+
+  firmware:
+    name: Firmware (compilation ESP32-S3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Cache du cœur ESP32
+        uses: actions/cache@v4
+        with:
+          path: ~/.arduino15
+          key: arduino-esp32-${{ runner.os }}-v1
+      - name: Installer le cœur et les bibliothèques
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install TFT_eSPI ESP32Servo
+      - name: Compiler (sans téléverser)
+        working-directory: balance-bot
+        run: |
+          set -e
+          # On réutilise EXACTEMENT la configuration de build.sh (source unique) : si les
+          # options changent, elles changent là-bas, pas ici.
+          FQBN=$(grep -m1 '^FQBN=' build.sh | cut -d'"' -f2)
+          FLAGS=$(grep -m1 '^FLAGS=' build.sh | cut -d'"' -f2)
+          echo "FQBN : $FQBN"
+          arduino-cli compile --fqbn "$FQBN" \
+            --build-property "compiler.cpp.extra_flags=$FLAGS" .

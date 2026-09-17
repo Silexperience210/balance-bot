@@ -124,7 +124,9 @@ balance-bot/          FIRMWARE (ce qui tourne sur la carte)
 chassis/              CAO : gen_bitcoin_bot.py, STL (v3/), NOTES_v3.md, rendus
 sim/                  simulateur Python (même correcteur que le firmware)
   web/                simulateur navigateur (Three.js + STL réels)
-docs/                 visuels et vidéo de présentation
+docs/                 visuels, vidéo de présentation et guide du simulateur
+scripts/              vérificateur de la règle d'or (simulateur ↔ firmware)
+ROADMAP.md            la feuille de route du projet, avec l'état de chaque chantier
 TEST_PROTOCOL.md      protocole du premier essai debout (à lire avant d'allumer)
 BACKLOG.md            suivi de la campagne d'amélioration
 REVIEW_KIMI.md        revue de code indépendante (agent Kimi K3)
