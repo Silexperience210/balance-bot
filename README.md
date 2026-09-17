@@ -18,6 +18,10 @@
 
 *Rien à installer : ça tourne dans le navigateur, avec les vrais fichiers STL du châssis.*
 
+📖 **[Guide du simulateur](docs/GUIDE-SIMULATEUR.md)** — les commandes, les scénarios, le
+capteur à ultrasons, et comment ajouter tes propres effets au robot (vent, pente, panne de
+capteur, tape…).
+
 </div>
 
 ---
