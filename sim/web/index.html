@@ -66,6 +66,13 @@
   #boutons-marche button { margin-right: 6px; }
   #vitesses button { margin-right: 6px; }
   #scenarios button { margin: 2px 4px 2px 0; }
+  #sel-visage {
+    width: 100%;
+    background: #262b33; color: var(--texte);
+    border: 1px solid var(--bord); border-radius: 5px;
+    padding: 6px 8px; font-size: 13px;
+  }
+  #sel-visage:hover { border-color: var(--orange); }
   /* ---- Sliders ---- */
   .reglage { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
   .reglage label { flex: 0 0 70px; color: var(--texte-dim); }
@@ -139,6 +146,17 @@
         </div>
         <h2>Scénarios</h2>
         <div id="scenarios"><!-- rempli par ui.js depuis BalanceEngine.scenarios --></div>
+        <h2>Visage (écran)</h2>
+        <select id="sel-visage">
+          <option value="auto" selected>auto — suit l'état simulé</option>
+          <option value="calme">calme</option>
+          <option value="penche">penché</option>
+          <option value="mefiant">méfiant</option>
+          <option value="enerve">énervé</option>
+          <option value="surprise">surpris</option>
+          <option value="content">content</option>
+          <option value="chute">chute</option>
+        </select>
       </div>
 
       <div class="panneau">

@@ -341,6 +341,209 @@
   robot.position.y = R;                  // axe des roues à hauteur R du sol
   scene.add(robot);
 
+  // ======================================================================
+  // Écran ST7789 (56 × 26 mm) : visage piloté par l'état simulé.
+  // Portage de balance-bot/ui.cpp (mode AUTO) : constantes « flashées » et
+  // table faceStyle() reprises telles quelles, dans le repère du firmware
+  // (320 × 170 px, y vers le bas — même convention que le canvas 2D).
+  // Simplifications : pas de ₿ en pupille, pas de clin d'œil (FX_CLIN), le
+  // « content » est un simple arc ∩ au lieu d'amande + arc couleur fond.
+  // ======================================================================
+  var FACE_CY = 84, FACE_CX_L = 100, FACE_CX_R = 219;   // EYE_GAP = 118
+  var LID_TOP = 0.28, EXP_TOP = 1.0, EXP_BOT = 0.62, IRIS_R = 0.52;
+
+  // faceStyle() : w, h, ang (°), slit (iris en fente), gazeMax (px), red.
+  var FACE_STYLES = {
+    calme:    { w: 104, h: 68, ang: 6,  slit: false, gazeMax: 18, red: false },
+    penche:   { w: 104, h: 57, ang: 13, slit: false, gazeMax: 16, red: false },
+    mefiant:  { w: 104, h: 44, ang: 15, slit: true,  gazeMax: 6,  red: false },
+    enerve:   { w: 104, h: 27, ang: 26, slit: true,  gazeMax: 6,  red: true  },
+    surprise: { w: 100, h: 76, ang: 3,  slit: false, gazeMax: 10, red: false },
+    content:  { w: 95,  h: 55, ang: 4,  slit: false, gazeMax: 18, red: false },
+    chute:    { w: 104, h: 68, ang: 6,  slit: false, gazeMax: 18, red: false }
+  };
+
+  // Canvas hors écran au ratio de la dalle (56:26), dessiné dans le repère
+  // firmware 320 × 170 via une transformée d'échelle.
+  var faceCanvas = document.createElement("canvas");
+  faceCanvas.width = 224;
+  faceCanvas.height = 104;
+  var faceCtx = faceCanvas.getContext("2d");
+  var faceTex = new THREE.CanvasTexture(faceCanvas);
+  faceTex.encoding = THREE.sRGBEncoding;
+
+  var ecran = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.056, 0.026),
+    new THREE.MeshBasicMaterial({ map: faceTex })   // dalle auto-lumineuse (non éclairée)
+  );
+  // Centre de la fenêtre écran (repère design → repère viewer, voir en-tête) :
+  // (X=59,5 ; y=18,0 ; Z=72,0) mm design → (18,0 ; 72,0−41,5 ; 59,5−64,565) mm.
+  ecran.position.set(0.018, 0.0305, -0.005065);
+  ecran.rotation.y = Math.PI / 2;        // la dalle regarde vers l'avant (+x)
+  groupeCorps.add(ecran);                // solidaire du corps : tangue avec θ
+
+  // Points de l'amande (faceEyePoints) : paupière haute franche, ventre
+  // bombé, miroir via `inn` (+1 œil gauche, −1 œil droit).
+  function amande(cx, w, h, ang, inn) {
+    var N = 18, pts = [];
+    var ht = h * LID_TOP, hb = h * (1 - LID_TOP);
+    var ca = Math.cos(ang * DEG), sa = Math.sin(ang * DEG);
+    var i, t, x, y;
+    for (i = 0; i <= N; i++) {           // paupière haute
+      t = -1 + 2 * i / N;
+      x = t * w / 2;
+      y = -ht * Math.pow(Math.max(0, 1 - t * t), EXP_TOP);
+      pts.push([cx + inn * (x * ca - y * sa), FACE_CY + (x * sa + y * ca)]);
+    }
+    for (i = 0; i <= N; i++) {           // paupière basse
+      t = 1 - 2 * i / N;
+      x = t * w / 2;
+      y = hb * Math.pow(Math.max(0, 1 - t * t), EXP_BOT);
+      pts.push([cx + inn * (x * ca - y * sa), FACE_CY + (x * sa + y * ca)]);
+    }
+    return pts;
+  }
+
+  function dessineOeil(cx, inn, st, f) {
+    var ctx = faceCtx;
+    var col = f.red ? "#ff603c" : "#ff9d2e";
+    if (f.expr === "content" && !f.blink) {
+      // « ^^ » : arc bombé vers le haut (le firmware superpose un arc couleur
+      // fond sur l'amande — même lecture, ici un seul tracé).
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 10;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.arc(cx, FACE_CY, st.w * 0.34, 200 * DEG, 340 * DEG);
+      ctx.stroke();
+      return;
+    }
+    var pts = amande(cx, st.w, st.h, st.ang, inn);
+    ctx.fillStyle = col;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.fill();
+    if (f.blink) return;                 // œil fermé : rien de plus
+    if (f.expr === "chute") {            // croix blanches par-dessus l'amande
+      ctx.strokeStyle = "#e8e8e8";
+      ctx.lineWidth = 4;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(cx - 17, FACE_CY - 17); ctx.lineTo(cx + 17, FACE_CY + 17);
+      ctx.moveTo(cx + 17, FACE_CY - 17); ctx.lineTo(cx - 17, FACE_CY + 17);
+      ctx.stroke();
+      return;
+    }
+    // Iris sombre (disque, ou fente si slit) + reflet — faceDrawEye().
+    var hb = st.h * (1 - LID_TOP);
+    var r = hb * IRIS_R;
+    var ix = cx + Math.max(-st.gazeMax, Math.min(st.gazeMax, f.gaze));
+    var iy = FACE_CY + hb * 0.30;
+    ctx.fillStyle = "#0d0f12";
+    if (st.slit) {
+      var ww = Math.max(2, r / 4);
+      ctx.fillRect(ix - ww, iy - r, 2 * ww + 1, 2 * r + 1);
+    } else {
+      ctx.beginPath();
+      ctx.arc(ix, iy, r, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#e8e8e8";           // reflet (côté intérieur, en haut)
+    ctx.beginPath();
+    ctx.arc(ix - inn * r * 0.4, iy - r * 0.4, Math.max(1.5, r * 0.22), 0, 2 * Math.PI);
+    ctx.fill();
+  }
+
+  function dessineVisage(f) {
+    faceCtx.setTransform(1, 0, 0, 1, 0, 0);
+    faceCtx.fillStyle = "#0d0f12";
+    faceCtx.fillRect(0, 0, faceCanvas.width, faceCanvas.height);
+    faceCtx.setTransform(faceCanvas.width / 320, 0, 0, faceCanvas.height / 170, 0, 0);
+    var st = FACE_STYLES[f.expr];
+    if (f.blink) st = { w: st.w, h: 8, ang: st.ang, slit: false, gazeMax: st.gazeMax, red: st.red };
+    dessineOeil(FACE_CX_L, +1, st, f);
+    dessineOeil(FACE_CX_R, -1, st, f);
+  }
+
+  // faceCompute() adaptée aux grandeurs du simulateur (pitchFilt / rateFilt
+  // en °, °/s), avec hystérésis kExprHoldMs = 400 ms et clignements
+  // (90 ms toutes les 3–6 s, même recette pseudo-aléatoire que le firmware).
+  var visage = {
+    expr: "calme", exprDepuis: 0,
+    prochainBlink: 3, blinkJusqua: -1,
+    forcee: null,                        // expression forcée par le sélecteur
+    dessin: null                         // dernière trame dessinée
+  };
+
+  function trameVisage(s) {
+    var t = s.t;
+    if (t < visage.exprDepuis) {         // reset : le temps a reculé
+      visage.exprDepuis = t;
+      visage.prochainBlink = t + 3;
+      visage.blinkJusqua = -1;
+    }
+    if (t >= visage.prochainBlink) {
+      visage.blinkJusqua = t + 0.09;
+      visage.prochainBlink = t + 3 + (t % 3);
+    }
+    var blink = t < visage.blinkJusqua;
+
+    var ap = Math.abs(s.pitchFilt), ar = Math.abs(s.rateFilt);
+    var expr;
+    if (visage.forcee) {
+      expr = visage.forcee;
+    } else if (s.fallen || s.verdict === "chute θ") {
+      expr = "chute";
+    } else if (s.verdict === "panic φ") {
+      expr = "enerve";
+    } else if (ar > 60) {
+      expr = "surprise";
+    } else if (ap > 8 || ar > 40) {
+      expr = "enerve";
+    } else if (ap < (visage.expr === "content" ? 2.5 : 1.5) &&
+               ar < (visage.expr === "content" ? 12 : 6)) {
+      expr = "content";
+    } else if (ap > 3) {
+      expr = "penche";
+    } else {
+      expr = "calme";
+    }
+    // Maintien minimal de 0,4 s — sauf la détresse, immédiate.
+    if (!visage.forcee && expr !== visage.expr &&
+        expr !== "chute" && expr !== "enerve" && expr !== "surprise" &&
+        t - visage.exprDepuis < 0.4) {
+      expr = visage.expr;
+    }
+    if (expr !== visage.expr) { visage.expr = expr; visage.exprDepuis = t; }
+
+    // Le regard suit le tangage, quantifié par pas de 2 px (gazeQ).
+    var gaze = Math.max(-18, Math.min(18, s.pitchFilt * 1.6));
+    gaze = Math.trunc(gaze / 2) * 2;
+
+    return { expr: expr, red: FACE_STYLES[expr].red, blink: blink, gaze: gaze };
+  }
+
+  // Redessine UNIQUEMENT quand la trame change (pas à chaque frame).
+  function majVisage() {
+    var f = trameVisage(sim.state);
+    var d = visage.dessin;
+    if (!d || d.expr !== f.expr || d.red !== f.red ||
+        d.blink !== f.blink || d.gaze !== f.gaze) {
+      dessineVisage(f);
+      faceTex.needsUpdate = true;
+      visage.dessin = f;
+    }
+  }
+
+  // Sélecteur manuel : force une expression, « auto » rend la main à l'état.
+  var selVisage = document.getElementById("sel-visage");
+  selVisage.addEventListener("change", function () {
+    visage.forcee = selVisage.value === "auto" ? null : selVisage.value;
+    visage.dessin = null;                // redessin immédiat
+  });
+
   // Met à jour les poses depuis l'état du moteur (degrés → radians).
   function majScene() {
     var s = sim.state;
@@ -437,6 +640,7 @@
 
     ajusteTaille();
     majScene();
+    majVisage();
     majTelemetrie();
     controles.update();
     renderer.render(scene, camera);
