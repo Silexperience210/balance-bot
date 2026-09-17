@@ -30,7 +30,7 @@
   "use strict";
 
   // ── Paramètres physiques (balancebot_sim.py l.72-74) ─────────────
-  var G = 9.81, R = 0.0325, H = 0.080;      // gravité, rayon arc (m), hauteur CoM (m)
+  var G = 9.81, R = 0.0415, H = 0.080;      // gravité, rayon de ROULAGE (pneu Ø83 → 41,5 mm), hauteur CoM (m)
   var TAU_SERVO = 0.05, VMAX_SERVO = 250.0; // servo : 1er ordre (s), vitesse max (°/s)
   var DT = 1.0 / 200;                       // pas de contrôle = 200 Hz (comme le code)
 
@@ -42,6 +42,13 @@
   var RECENTER_PERIOD = 0.100;              // 10 Hz
   var RECENTER_VEL_MAX = 20.0, RECENTER_REF_MAX = 6.0, RECENTER_SLEW = 3.0;
   var FOOT_VEL_TAU = 0.08, FOOT_PANIC = 35.0;
+  // ── MÉCANIQUE ──────────────────────────────────────────────────────
+  // Le robot RÉEL = ROUES Ø80 + pneus Ø83 sur servos **360° continus**
+  // (FS90R) : la roue tourne LIBREMENT → NI butée ±45°, NI soft clamp de
+  // butée, NI panic. Ces garde-fous modélisaient l'ARC (ancienne mécanique,
+  // R = 32,5 mm) ; ils restent disponibles pour comparaison. Miroir exact de
+  // sim/balancebot_sim.py (MODE) — les deux se changent ENSEMBLE.
+  var MODE = "roue";                        // "roue" = le robot réel | "arc"
   // Retard TOTAL de boucle forfaitaire (ctrl() du Python : tau_f = 0.025) :
   // appliqué au pitch ET au gyro. Le verdict du sim en dépend (§2 #9).
   var TAU_F = 0.025;
@@ -327,7 +334,7 @@
         if (t - recenterLast >= RECENTER_PERIOD) {
           var dtRec = Math.min(Math.max(t - recenterLast, 0.0), 1.0);
           recenterLast = t;
-          if (Math.abs(phiCmd) > FOOT_PANIC) {
+          if (MODE === "arc" && Math.abs(phiCmd) > FOOT_PANIC) {
             panicked = true;
           } else {
             var target = Math.max(-RECENTER_VEL_MAX, Math.min(RECENTER_VEL_MAX, kpPhi * (0.0 - phiCmd)));
@@ -369,7 +376,7 @@
       // SIGNE (REVIEW_CLAUDE.md M2) : `out` est la sortie PID NON inversée ;
       // la vitesse de pied réelle est u = −out. Le pied pousse vers la butée
       // quand u·φ > 0 ⇔ (−out)·φ > 0.
-      if ((-out) * phiCmd > 0) {
+      if (MODE === "arc" && (-out) * phiCmd > 0) {
         var lim = Math.min(FOOT_HARD, 90.0 - Math.abs(pitchF) - FOOT_MARGIN);
         out *= Math.max(0.0, Math.min(1.0, (lim - Math.abs(phiCmd)) / FOOT_TAPER));
       }
@@ -392,7 +399,13 @@
       lastOut = out;
       var u = -out * kOut;
       lastU = u;
-      phiCmd = Math.max(-FOOT_HARD, Math.min(FOOT_HARD, phiCmd + u * DT));
+      // roue (servo 360°) : pas de butée, la roue tourne sans fin ;
+      // arc : butée dure ±FOOT_HARD (ancienne mécanique).
+      if (MODE === "arc") {
+        phiCmd = Math.max(-FOOT_HARD, Math.min(FOOT_HARD, phiCmd + u * DT));
+      } else {
+        phiCmd += u * DT;
+      }
       var dphi = Math.max(-VMAX_SERVO, Math.min(VMAX_SERVO, (phiCmd - phi) / TAU_SERVO));
       var dphidd = (dphi - prevDphi) / DT * (Math.PI / 180.0);   // rad/s²
       prevDphi = dphi;

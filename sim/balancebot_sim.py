@@ -19,10 +19,12 @@ Usage :
   python3 balancebot_sim.py --sweep         # balayage Kp/Ki/Kd/k_out (tient les 6 scénarios ?)
 
 ── Physique (modèle) ────────────────────────────────────────────────────────
-Pendule inversé : masse ponctuelle m à la hauteur h au-dessus de l'axe, arc de
-rayon R centré sur l'axe, qui roule sans glisser. La position du pied est
-l'angle de servo φ (relatif au corps), IMPOSÉ par le servo ; la rotation
-ABSOLUE de l'arc vaut (θ + φ), donc x_axe = R·(θ + φ). Lagrange avec
+MÉCANIQUE RÉELLE = ROUES Ø80 + pneus Ø83 entraînées par des servos **360°
+continus** (FS90R) : la roue tourne LIBREMENT (pas de butée). Pendule inversé :
+masse ponctuelle m à la hauteur h au-dessus de l'axe, ROUE de rayon R (rayon de
+roulage avec le pneu = 41,5 mm) centrée sur l'axe, qui roule sans glisser. La
+position est l'angle φ (relatif au corps), IMPOSÉ par le servo ; la rotation
+ABSOLUE de la roue vaut (θ + φ), donc x_axe = R·(θ + φ). Lagrange avec
 T = ½·m·(ẋ² + ẏ²) du CoM et V = m·g·(R + h·cosθ), φ(t) donné :
 
     θ̈ · (R² + 2·R·h·cosθ + h²) = g·h·sinθ − φ̈ · R·(R + h·cosθ) + R·h·sinθ · θ̇²
@@ -51,25 +53,23 @@ Servo : suivi de la consigne de position en 1er ordre (τ = 50 ms) borné à
   dépend (REVIEW_CLAUDE.md §2 #9).
 Le réglage réel reste indispensable.
 
-── État de validation (mesuré, 17/09/2026, après REVIEW_CLAUDE.md) ─────────
-Gains embarqués Kp25/Ki500/Kd0.5, k_out = 1 : 0/6 AVANT comme APRÈS les
-corrections M1/M2/M3/M5/M10 — chute θ en 0,4-0,5 s, donc AVANT la tape
-(t = 3 s) : les trois scénarios « tape » ne sont jamais joués avec ces gains.
-Le balayage Kp/Ki/Kd × k_out ∈ {1, 2, 3} ne trouve aucun 6/6 : cascade à
-Kv = 3 → tout panique φ en 0,2-0,4 s (elle sature la sortie) ; Kv = 0 ou sans
-cascade → au mieux 2/6 (les θ0 = 2°), et seulement pour k_out ≥ 2. Les tapes
-ne sont ATTEINTES qu'avec k_out = 3 et Kv = 0 (ex. Kp25/Ki350/Kd1 : θ0 = 2°
-tenus 6 s, panic φ 0,1-0,2 s APRÈS chaque tape — 0,4 rad/s consomme déjà les
-±25 mm de course). Le verdict dépend du retard forfaitaire tau_f = 25 ms
-(§2 #9, non modifié). Historique : la validation d'origine (09/09) reposait
-sur un modèle 57× trop optimiste (facteur °/rad) et SANS cascade (commit
-19535f7). Utiliser ce script pour CHERCHER des gains, pas pour certifier ceux
-qui sont embarqués.
+​── État de validation (mesuré, 17/09/2026 — MÉCANIQUE ROUE, R = 41,5 mm) ───
+MODE = "roue" (le robot réel) : ni butée ±45°, ni soft clamp, ni panic.
+Le jeu embarqué Kp25/Ki500/Kd0.5 (k_out = 1, cascade Kv = 3) tient toujours
+**0/6** — chute θ en 0,42-0,55 s : la cascade à Kv = 3 reste un passif.
+En revanche, avec Kv = 0 le robot TIENT dès k_out = 1 : le jeu
+Kp25/Ki350/Kd1/k_out=3/Kv=0 tient **5/6** (seule la tape 1,2 rad/s le fait
+tomber, à 3,6 s) — les roues libres changent tout par rapport à l'arc.
+MODE = "arc" (ancienne mécanique R = 32,5 mm, butée ±45°) reste disponible
+pour comparaison : c'est lui qui donnait 2/6 et des « panic φ ».
+Historique : la validation d'origine (09/09) reposait sur un modèle 57× trop
+optimiste (facteur °/rad) et SANS cascade (commit 19535f7). Utiliser ce script
+pour CHERCHER des gains, pas pour certifier ceux qui sont embarqués.
 """
 import math, random, sys
 
 # ── Paramètres physiques ─────────────────────────────────────────────
-G, R, H = 9.81, 0.0325, 0.080       # gravité, rayon arc (m), hauteur CoM (m)
+G, R, H = 9.81, 0.0415, 0.080       # gravité, rayon de ROULAGE (pneu Ø83 → 41,5 mm), hauteur CoM (m)
 TAU_SERVO, VMAX_SERVO = 0.05, 250.0  # servo : 1er ordre (s), vitesse max (°/s)
 DT = 1.0 / 200                       # pas de contrôle = 200 Hz (comme le code)
 
@@ -78,6 +78,12 @@ OUT_MAX = 90.0
 INTEGRAL_MAX = OUT_MAX               # kIntegralMax = kOutMax (M10 : I est la raideur)
 DEADBAND = 0.0                       # kErrDeadbandDeg = 0 (M3 : la bande + I = cliquet)
 FOOT_HARD, FOOT_MARGIN, FOOT_TAPER, FALL_ANGLE = 45.0, 9.0, 10.0, 45.0
+# ── MÉCANIQUE ─────────────────────────────────────────────────────────
+# Le robot RÉEL = ROUES Ø80 + pneus Ø83 entraînées par des servos **360°
+# continus** (FS90R) : la roue tourne LIBREMENT — il n'y a donc NI butée ±45°,
+# NI soft clamp de butée, NI « panic ». Ces garde-fous modélisaient l'ARC
+# (ancienne mécanique, R = 32,5 mm) ; ils restent disponibles pour comparaison.
+MODE = "roue"            # "roue" = le robot réel | "arc" = ancienne mécanique
 # kOutToFootDegS n'est plus une constante : paramètre k_out de Sim (M11),
 # réglable au banc web (1-3) et balayé par --sweep.
 RECENTER_PERIOD = 0.100              # 10 Hz
@@ -119,7 +125,7 @@ class Sim:
             if t - self.recenter_last >= RECENTER_PERIOD:
                 dt_rec = min(max(t - self.recenter_last, 0.0), 1.0)
                 self.recenter_last = t
-                if abs(self.phi_cmd) > FOOT_PANIC:
+                if MODE == "arc" and abs(self.phi_cmd) > FOOT_PANIC:
                     self.panicked = True
                 else:
                     target = max(-RECENTER_VEL_MAX, min(RECENTER_VEL_MAX, self.kp_phi * (0.0 - self.phi_cmd)))
@@ -162,7 +168,7 @@ class Sim:
         # balance.cpp (limitTowardStop après l'inversion : out·footAvg ≤ 0 →
         # libre). L'ancien test `out * phi_cmd > 0` atténuait le RETOUR vers le
         # centre et laissait la poussée vers la butée à pleine autorité.
-        if (-out) * self.phi_cmd > 0:
+        if MODE == "arc" and (-out) * self.phi_cmd > 0:
             lim = min(FOOT_HARD, 90.0 - abs(self.pitch_f) - FOOT_MARGIN)
             out *= max(0.0, min(1.0, (lim - abs(self.phi_cmd)) / FOOT_TAPER))
         # estimateur φ̇ : filtre 1er ordre de la commande APRÈS clamp, AVANT différentiel.
@@ -183,7 +189,12 @@ class Sim:
             # câblage stabilisant (comme le firmware) puis °/s de pied via k_out
             # (Feet::driveFootSpeed(out · kOutToFootDegS))
             u = -self.ctrl(noise, t) * self.k_out
-            self.phi_cmd = max(-FOOT_HARD, min(FOOT_HARD, self.phi_cmd + u * DT))
+            # roue (servo 360°) : pas de butée, la roue tourne sans fin ;
+            # arc : butée dure ±FOOT_HARD (ancienne mécanique).
+            if MODE == "arc":
+                self.phi_cmd = max(-FOOT_HARD, min(FOOT_HARD, self.phi_cmd + u * DT))
+            else:
+                self.phi_cmd += u * DT
             dphi = max(-VMAX_SERVO, min(VMAX_SERVO, (self.phi_cmd - self.phi) / TAU_SERVO))
             dphidd = (dphi - self.prev_dphi) / DT * (math.pi / 180.0)   # rad/s²
             self.prev_dphi = dphi
