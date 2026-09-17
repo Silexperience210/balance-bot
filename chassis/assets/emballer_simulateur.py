@@ -14,7 +14,7 @@ D = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 OUT = os.path.join(D, "simulateur-balancebot.html")
 
 ORDRE = ["lib/three.min.js", "lib/OrbitControls.js",
-         "engine.js", "parts.js", "ui.js"]
+         "engine.js", "ultrason.js", "parts.js", "ui.js"]
 
 with open(os.path.join(D, "index.html"), encoding="utf-8") as fh:
     html = fh.read()

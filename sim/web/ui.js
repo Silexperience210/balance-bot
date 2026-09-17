@@ -38,7 +38,15 @@
     msg.style.display = "block";
     return;
   }
+  // ---- Vérifie la présence du module capteur ultrason (miroir de head.cpp) ----
+  if (!window.Ultrason || typeof window.Ultrason.create !== "function") {
+    var msgUs = document.getElementById("msg-moteur");
+    msgUs.textContent = "⚠ ultrason.js introuvable ou invalide : window.Ultrason n'est pas défini.";
+    msgUs.style.display = "block";
+    return;
+  }
   var BE = window.BalanceEngine;
+  var US = window.Ultrason;
 
   // Constante géométrique du rendu (pas de physique ici) : rayon de roulement
   // WHEEL_R = 41,5 mm (gen_bitcoin_bot.py) — l'axe des roues est à 41,5 mm du sol.
@@ -46,6 +54,7 @@
 
   // ---- État du viewer ----
   var sim = BE.create(BE.defaults);
+  var us = US.create();          // capteur HC-SR04 + tête pan/tilt (head.cpp)
   var scenarioCourant = BE.scenarios[0];
   var enMarche = false;
   var accumulateur = 0;        // temps simulé à consommer (s)
@@ -176,6 +185,7 @@
         champs.noise.input.value = sc.noise;
         champs.noise.val.textContent = (+sc.noise).toFixed(2);
         sim.reset(sc);
+        us.reset();              // le capteur repart comme le robot
         // Le slider vient d'être aligné sur sc.noise : pousseReglages() propage tout.
         pousseReglages();
         accumulateur = 0;
@@ -201,6 +211,7 @@
   });
   document.getElementById("btn-reset").addEventListener("click", function () {
     sim.reset(scenarioCourant);
+    us.reset();                    // Head::begin() : lissage + balayage à zéro
     accumulateur = 0;
     enMarche = false;
     majBoutons();
@@ -260,6 +271,24 @@
     editeur.value = CODE_DEFAUT;
     zoneErreur.textContent = "";
     sim.setCustom(null);   // remet le modèle nominal (aucun effet)
+  });
+
+  // ======================================================================
+  // Panneau « Capteur ultrason » : curseur d'obstacle + case « débranché »
+  // ======================================================================
+  var rgDistance = document.getElementById("rg-distance");
+  var vDistance = document.getElementById("v-distance");
+  rgDistance.addEventListener("input", function () {
+    distanceObstacleM = (+rgDistance.value) / 100;
+    vDistance.textContent = rgDistance.value + " cm";
+    placeObstacle();
+  });
+
+  var rgCapteur = document.getElementById("rg-capteur");
+  var vCapteur = document.getElementById("v-capteur");
+  rgCapteur.addEventListener("change", function () {
+    us.setActif(rgCapteur.checked);
+    vCapteur.textContent = rgCapteur.checked ? "ECHO câblé" : "débranché";
   });
 
   // ======================================================================
@@ -383,6 +412,105 @@
   robot.add(groupePieds);
   robot.position.y = R;                  // axe des roues à hauteur R du sol
   scene.add(robot);
+
+  // ======================================================================
+  // Capteurs HC-SR04 (les « yeux » du robot réel, voir docs/photos/
+  // robot-reel.jpg) : pièces ACHETÉES, pas de STL → modélisation Three.js.
+  // Module réel ≈ 45 × 20 × 15 mm, deux transducteurs cylindriques Ø16 mm.
+  // Deux modules sur la face avant, partie haute, symétriques en Z.
+  // Solidaires de groupeCorps : ils tangue(nt) avec θ comme le corps.
+  // ======================================================================
+  var matPCB = new THREE.MeshStandardMaterial({
+    color: 0x14508c, metalness: 0.2, roughness: 0.6     // sérigraphie bleue HC-SR04
+  });
+  var matTransd = new THREE.MeshStandardMaterial({
+    color: 0xc9ccd2, metalness: 0.85, roughness: 0.35   // aluminium des transducteurs
+  });
+  var matGrilleUS = new THREE.MeshStandardMaterial({
+    color: 0x7f848c, metalness: 0.6, roughness: 0.55    // grille avant du transducteur
+  });
+
+  function moduleHCSR04() {
+    var g = new THREE.Group();
+    // PCB : 45 mm (Z) × 20 mm (Y) × 2 mm (X), face avant vers +X
+    var pcb = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.020, 0.045), matPCB);
+    pcb.position.x = 0.001;
+    g.add(pcb);
+    // Deux transducteurs Ø16 × 12 mm, axes vers +X, centrés à ±11 mm en Z
+    [-0.011, 0.011].forEach(function (dz) {
+      var corps = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.008, 0.008, 0.012, 24), matTransd);
+      corps.rotation.z = -Math.PI / 2;                   // axe Y → axe X
+      corps.position.set(0.008, 0, dz);
+      var grille = new THREE.Mesh(
+        new THREE.CircleGeometry(0.0068, 24), matGrilleUS);
+      grille.rotation.y = Math.PI / 2;                   // face vers +X
+      grille.position.set(0.0141, 0, dz);
+      corps.castShadow = true;
+      g.add(corps); g.add(grille);
+    });
+    pcb.castShadow = true;
+    return g;
+  }
+
+  // Position sur la face avant (repère viewer, m) : la coque avant s'étend
+  // jusqu'à x = 23 mm (parts.js, b_front) ; partie haute du ₿, au-dessus de
+  // l'écran (y = +30,5 mm) — les yeux de la photo réelle.
+  var US_Y = 0.098, US_Z = 0.026, US_X = 0.023;
+  var moduleG = moduleHCSR04(); moduleG.position.set(US_X, US_Y, +US_Z);
+  var moduleD = moduleHCSR04(); moduleD.position.set(US_X, US_Y, -US_Z);
+  groupeCorps.add(moduleG);
+  groupeCorps.add(moduleD);
+
+  // Sonde LOGIQUE : le firmware n'a qu'UN HC-SR04 (PIN_US_TRIG=11,
+  // PIN_US_ECHO=12, config.h l.61-62) — la mesure part du milieu des deux
+  // modules, à hauteur de la face avant des transducteurs.
+  var sonde = new THREE.Object3D();
+  sonde.position.set(US_X + 0.015, US_Y, 0);
+  groupeCorps.add(sonde);
+
+  // Faisceau ultrason : cône apex au capteur, s'évasant vers l'obstacle
+  // (demi-angle ~7°, proche du lobe du HC-SR04). Couleur selon l'état.
+  var geoFaisceau = new THREE.ConeGeometry(0.0122, 1, 24, 1, true);
+  geoFaisceau.translate(0, -0.5, 0);          // apex à l'origine, base à y = −1
+  geoFaisceau.rotateZ(Math.PI / 2);           // base vers +X
+  var matFaisceau = new THREE.MeshBasicMaterial({
+    color: 0x5bbf6a, transparent: true, opacity: 0.16,
+    depthWrite: false, side: THREE.DoubleSide
+  });
+  var faisceau = new THREE.Mesh(geoFaisceau, matFaisceau);
+  faisceau.position.copy(sonde.position);
+  groupeCorps.add(faisceau);
+
+  // ---- Obstacle déplaçable : plaque verticale devant le robot. Le curseur
+  //      fixe sa position au RESET du robot (x = 0 = axe des roues) ; la
+  //      distance MESURÉE est recalculée chaque frame depuis la sonde. ----
+  var OBSTACLE_EP = 0.01;                     // épaisseur 10 mm
+  var obstacle = new THREE.Mesh(
+    new THREE.BoxGeometry(OBSTACLE_EP, 0.14, 0.10),
+    new THREE.MeshStandardMaterial({ color: 0x8a919c, metalness: 0.1, roughness: 0.8 })
+  );
+  obstacle.castShadow = true;
+  obstacle.receiveShadow = true;
+  scene.add(obstacle);
+
+  var distanceObstacleM = 0.80;               // position du curseur (m)
+  function placeObstacle() {
+    obstacle.position.set(distanceObstacleM, 0.07, 0);
+  }
+  placeObstacle();
+
+  // Distance RÉELLE capteur → face avant de l'obstacle, dans le plan du sol
+  // (l'obstacle est vertical : l'écho revient de sa face, quelle que soit la
+  // hauteur). −1 = obstacle derrière le capteur (pas d'écho).
+  var vSonde = new THREE.Vector3();
+  function distanceReelleCm() {
+    sonde.getWorldPosition(vSonde);
+    var dx = (obstacle.position.x - OBSTACLE_EP / 2) - vSonde.x;
+    if (dx < 0) return -1;
+    var dz = obstacle.position.z - vSonde.z;
+    return Math.sqrt(dx * dx + dz * dz) * 100;   // m → cm
+  }
 
   // ======================================================================
   // Écran ST7789 (56 × 26 mm) : visage piloté par l'état simulé.
@@ -517,6 +645,8 @@
     expr: "calme", exprDepuis: 0,
     prochainBlink: 3, blinkJusqua: -1,
     forcee: null,                        // expression forcée par le sélecteur
+    exprAnim: null,                      // expression forcée par une ANIMATION
+    gazeAnim: null,                      // regard forcé par une ANIMATION (px)
     dessin: null                         // dernière trame dessinée
   };
 
@@ -559,10 +689,15 @@
         t - visage.exprDepuis < 0.4) {
       expr = visage.expr;
     }
+    // Couche ANIMATION : cosmétique, prime sur l'expression automatique
+    // (mais pas sur le sélecteur manuel, qui reste prioritaire).
+    if (!visage.forcee && visage.exprAnim) expr = visage.exprAnim;
     if (expr !== visage.expr) { visage.expr = expr; visage.exprDepuis = t; }
 
-    // Le regard suit le tangage, quantifié par pas de 2 px (gazeQ).
+    // Le regard suit le tangage, quantifié par pas de 2 px (gazeQ) — sauf si
+    // une animation le force (regard gauche-droite).
     var gaze = Math.max(-18, Math.min(18, s.pitchFilt * 1.6));
+    if (visage.gazeAnim !== null) gaze = Math.max(-18, Math.min(18, visage.gazeAnim));
     gaze = Math.trunc(gaze / 2) * 2;
 
     return { expr: expr, red: FACE_STYLES[expr].red, blink: blink, gaze: gaze };
@@ -587,16 +722,93 @@
     visage.dessin = null;                // redessin immédiat
   });
 
+  // ======================================================================
+  // ANIMATIONS du corps — couche strictement COSMÉTIQUE.
+  // Ces offsets sont ajoutés au MAILLAGE après la pose physique : jamais
+  // dans sim.state, jamais dans la commande. « Aucune » = offsets nuls →
+  // image strictement identique à l'original. L'horloge est le temps RÉEL
+  // (rAF) : l'animation joue même en pause, sans toucher à la physique.
+  // ======================================================================
+  var animCourante = "aucune";
+  var animT0 = 0;                        // déclenchement (ms, horloge rAF)
+  var maintenantMs = 0;                  // dernier timestamp rAF connu
+
+  function offsetsAnim() {
+    var z = { pitch: 0, lacet: 0, saut: 0, expr: null, gaze: null };
+    if (animCourante === "aucune") return z;
+    var t = (maintenantMs - animT0) / 1000;
+    if (t < 0) return z;
+    switch (animCourante) {
+      case "hochement":                  // oui-oui : ±4° de tangage, en boucle
+        z.pitch = -4 * DEG * Math.sin(2 * Math.PI * 1.6 * t);
+        z.expr = "content";
+        break;
+      case "regard":                     // balayage de lacet ±16° + regard
+        z.lacet = 16 * DEG * Math.sin(2 * Math.PI * 0.5 * t);
+        z.gaze = 18 * Math.sin(2 * Math.PI * 0.5 * t);
+        z.expr = "calme";
+        break;
+      case "sursaut": {                  // one-shot 0,7 s : bond + recul
+        var p = t / 0.7;
+        if (p < 1) {
+          z.saut = 0.022 * Math.sin(Math.PI * p);
+          z.pitch = 5 * DEG * Math.sin(Math.PI * p);
+          z.expr = "surprise";
+        }
+        break;
+      }
+      case "danse":                      // lacet + rebond + tangage, en boucle
+        z.lacet = 20 * DEG * Math.sin(2 * Math.PI * 1.1 * t);
+        z.pitch = -3 * DEG * Math.sin(2 * Math.PI * 2.2 * t);
+        z.saut = 0.008 * Math.abs(Math.sin(2 * Math.PI * 2.2 * t));
+        z.expr = "content";
+        break;
+    }
+    return z;
+  }
+
+  var selAnim = document.getElementById("sel-anim");
+  selAnim.addEventListener("change", function () {
+    animCourante = selAnim.value;
+    animT0 = maintenantMs;               // relance proprement depuis t = 0
+  });
+  document.getElementById("btn-anim-rejouer").addEventListener("click", function () {
+    animT0 = maintenantMs;               // rejoue l'animation courante
+  });
+
   // Met à jour les poses depuis l'état du moteur (degrés → radians).
   function majScene() {
     var s = sim.state;
     var th = s.theta * DEG;
     var ph = s.phi * DEG;
-    groupeCorps.rotation.z = -th;              // θ > 0 → penche vers +X
+    var an = offsetsAnim();
+    groupeCorps.rotation.z = -th + an.pitch;   // θ physique + offset cosmétique
+    groupeCorps.rotation.y = an.lacet;         // lacet cosmétique uniquement
     groupePieds.rotation.z = -(th + ph);       // spin des roues (roulement + servo φ)
     robot.position.x = R * (th + ph);          // roulement sans glissement
+    robot.position.y = R + an.saut;            // rebond cosmétique uniquement
+    visage.exprAnim = an.expr;
+    visage.gazeAnim = an.gaze;
     // Chute : lueur rouge discrète du corps
     matCoque.emissive.setHex(s.fallen ? 0x4a1208 : 0x000000);
+
+    // Faisceau ultrason : longueur = distance réelle (bornée à la portée),
+    // couleur = état publié par le capteur (vert / rouge / gris discret).
+    var u = us.state;
+    var dCm = distanceReelleCm();
+    faisceau.visible = u.actif;
+    var longueur = (dCm >= 0 ? Math.min(dCm, US.constants.US_MAX_CM) : US.constants.US_MAX_CM) / 100;
+    faisceau.scale.x = Math.max(0.02, longueur);
+    if (u.obstacleWarn) {
+      matFaisceau.color.setHex(0xe0533d);      // ALERTE < 25 cm
+      matFaisceau.opacity = 0.35;
+    } else if (u.obstacleCm >= 0) {
+      matFaisceau.color.setHex(0x5bbf6a);      // obstacle dans la portée
+      matFaisceau.opacity = 0.18;
+    } else {
+      matFaisceau.color.setHex(0x8a919c);      // rien / hors portée
+      matFaisceau.opacity = 0.08;
+    }
   }
 
   // Redimensionnement du renderer selon le conteneur (vérifié à chaque frame)
@@ -651,6 +863,38 @@
     }
   }
 
+  // ---- Télémétrie du capteur ultrason (état publié par ultrason.js) ----
+  var elUs = {
+    distance: document.getElementById("us-distance"),
+    etat: document.getElementById("us-etat"),
+    cadence: document.getElementById("us-cadence"),
+    echecs: document.getElementById("us-echecs"),
+    tete: document.getElementById("us-tete"),
+    angle: document.getElementById("us-angle")
+  };
+
+  function majTelemetrieUS() {
+    var u = us.state;
+    elUs.distance.textContent = u.obstacleCm >= 0 ? u.obstacleCm.toFixed(1) + " cm" : "—";
+    if (!u.actif) {
+      elUs.etat.textContent = "absent (ECHO débranché)";
+      elUs.etat.className = "rien";
+    } else if (u.obstacleWarn) {
+      elUs.etat.textContent = "ALERTE < 25 cm";
+      elUs.etat.className = "alerte";
+    } else if (u.obstacleCm >= 0) {
+      elUs.etat.textContent = "obstacle";
+      elUs.etat.className = "obstacle";
+    } else {
+      elUs.etat.textContent = "rien";
+      elUs.etat.className = "rien";
+    }
+    elUs.cadence.textContent = u.cadenceMs + " ms";
+    elUs.echecs.textContent = String(u.failStreak);
+    elUs.tete.textContent = u.headPanDeg + "° / " + u.headTiltDeg + "°";
+    elUs.angle.textContent = u.angleVu >= 0 ? u.angleVu + "°" : "—";
+  }
+
   // ======================================================================
   // Boucle principale (requestAnimationFrame, temps réel × vitesse de lecture)
   // ======================================================================
@@ -658,6 +902,7 @@
     if (dernierT === null) dernierT = maintenant;
     var dtReel = Math.min(0.1, (maintenant - dernierT) / 1000);
     dernierT = maintenant;
+    maintenantMs = maintenant;           // horloge des animations cosmétiques
 
     if (enMarche && !sim.state.verdict) {
       accumulateur += dtReel * vitesseLecture;
@@ -665,7 +910,13 @@
       if (n > 0) {
         if (n > 2000) n = 2000;                  // garde-fou anti-spirale
         accumulateur -= n * BE.defaults.dt;
+        // La distance est figée le temps du lot : le capteur échantillonne
+        // au plus tous les 40 pas (200 ms), l'approximation est invisible.
+        var dCm = distanceReelleCm();
         sim.stepMany(n);
+        // Le capteur partage l'horloge du moteur (pas de 5 ms, 200 Hz) :
+        // ses mesures tombent aux mêmes instants que sur le robot réel.
+        us.tickMany(n, dCm, !sim.state.fallen);
         pasComptes += n;
       }
     } else {
@@ -685,6 +936,7 @@
     majScene();
     majVisage();
     majTelemetrie();
+    majTelemetrieUS();
     controles.update();
     renderer.render(scene, camera);
     requestAnimationFrame(boucle);

@@ -66,13 +66,14 @@
   #boutons-marche button { margin-right: 6px; }
   #vitesses button { margin-right: 6px; }
   #scenarios button { margin: 2px 4px 2px 0; }
-  #sel-visage {
+  #sel-visage, #sel-anim {
     width: 100%;
     background: #262b33; color: var(--texte);
     border: 1px solid var(--bord); border-radius: 5px;
     padding: 6px 8px; font-size: 13px;
   }
-  #sel-visage:hover { border-color: var(--orange); }
+  #sel-visage:hover, #sel-anim:hover { border-color: var(--orange); }
+  #sel-anim { margin-bottom: 6px; }
   /* ---- Sliders ---- */
   .reglage { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
   .reglage label { flex: 0 0 70px; color: var(--texte-dim); }
@@ -80,8 +81,11 @@
   .reglage .val { flex: 0 0 56px; text-align: right; font-variant-numeric: tabular-nums; }
   .reglage input[type=checkbox] { accent-color: var(--orange); }
   /* ---- Télémétrie ---- */
-  #telemetrie { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font-variant-numeric: tabular-nums; }
-  #telemetrie .nom { color: var(--texte-dim); }
+  #telemetrie, #tele-us { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font-variant-numeric: tabular-nums; }
+  #telemetrie .nom, #tele-us .nom { color: var(--texte-dim); }
+  #us-etat.alerte { color: var(--rouge); font-weight: 700; }
+  #us-etat.obstacle { color: var(--vert); }
+  #us-etat.rien { color: var(--texte-dim); }
   #verdict.ok     { color: var(--vert); font-weight: 600; }
   #verdict.chute  { color: var(--rouge); font-weight: 600; }
   #verdict.panique{ color: var(--jaune); font-weight: 600; }
@@ -165,6 +169,40 @@
       </div>
 
       <div class="panneau">
+        <h2>Capteur ultrason (HC-SR04)</h2>
+        <div class="reglage">
+          <label>Obstacle</label>
+          <input type="range" id="rg-distance" min="5" max="200" step="1" value="80">
+          <span class="val" id="v-distance">80 cm</span>
+        </div>
+        <div class="reglage">
+          <label>Capteur</label>
+          <input type="checkbox" id="rg-capteur" checked>
+          <span class="val" id="v-capteur" style="text-align:left">ECHO câblé</span>
+        </div>
+        <div id="tele-us">
+          <span class="nom">Distance lissée</span> <span id="us-distance">—</span>
+          <span class="nom">État</span>            <span id="us-etat" class="rien">—</span>
+          <span class="nom">Cadence</span>         <span id="us-cadence">—</span>
+          <span class="nom">Échecs consécutifs</span> <span id="us-echecs">—</span>
+          <span class="nom">Tête pan / tilt</span> <span id="us-tete">—</span>
+          <span class="nom">Angle vu</span>        <span id="us-angle">—</span>
+        </div>
+      </div>
+
+      <div class="panneau">
+        <h2>Animations</h2>
+        <select id="sel-anim">
+          <option value="aucune" selected>Aucune</option>
+          <option value="hochement">Hochement</option>
+          <option value="regard">Regard gauche-droite</option>
+          <option value="sursaut">Sursaut</option>
+          <option value="danse">Danse</option>
+        </select>
+        <button id="btn-anim-rejouer">Rejouer</button>
+      </div>
+
+      <div class="panneau">
         <h2>Télémétrie</h2>
         <div id="telemetrie">
           <span class="nom">θ (corps)</span>      <span id="t-theta">—</span>
@@ -182,8 +220,10 @@
   <!-- Libs locales (UMD, pas de module ES, pas de CDN) -->
   <script src="lib/three.min.js"></script>
   <script src="lib/OrbitControls.js"></script>
-  <!-- Ordre garanti : le moteur d'abord, les pièces 3D (générées, base64), le viewer ensuite -->
+  <!-- Ordre garanti : le moteur d'abord, le capteur ultrason (miroir de
+       head.cpp), les pièces 3D (générées, base64), le viewer ensuite -->
   <script src="engine.js"></script>
+  <script src="ultrason.js"></script>
   <script src="parts.js"></script>
   <script src="ui.js"></script>
 </body>

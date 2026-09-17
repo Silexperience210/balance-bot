@@ -22,6 +22,8 @@
   "use strict";
   var E = (typeof BalanceEngine !== "undefined") ? BalanceEngine
         : require("./engine.js");
+  var U = (typeof Ultrason !== "undefined") ? Ultrason
+        : require("./ultrason.js");
 
   var lines = [], failures = 0;
   function log(s) { lines.push(s); if (typeof console !== "undefined") console.log(s); }
@@ -129,6 +131,88 @@
   check(sim3.state.verdict === "chute θ" && sim3.state.t === 1.0,
         "state.theta = 60° écrit par le hook à t = 1 s → « chute θ » au même pas");
   sim3.setCustom(null);
+  log("");
+
+  // ── 5. Capteur ultrason + tête (ultrason.js, miroir de head.cpp) ──
+  log("5. Capteur HC-SR04 (ultrason.js) — cadence, lissage, portée, alerte, tête");
+  // Cadence normale 200 ms : mesures à 200, 400, …, 1000 ms (tous les 40 pas).
+  var us = U.create();
+  var fois = [];
+  for (var i = 0; i < 200; i++) { us.tick(80, true); if (us.state.mesureFaite) fois.push(us.state.derniereMesureMs); }
+  check(fois.join(",") === "200,400,600,800,1000",
+        "cadence 200 ms : mesures à " + fois.join(", ") + " ms");
+  check(us.state.obstacleCm === 80,
+        "lissage amorcé sur la 1re mesure : obstacleCm = 80 cm exactement");
+
+  // Lissage exponentiel sur 5 : saut 80 → 30 cm, une mesure plus tard :
+  // moy = 80 + (30 − 80)/5 = 70. Puis convergence vers 30.
+  us.tickMany(40, 30, true);
+  check(near(us.state.obstacleCm, 70, 1e-12),
+        "saut 80→30 cm : une mesure après, moy = " + us.state.obstacleCm.toFixed(2) + " (attendu 70)");
+  us.tickMany(2000, 30, true);
+  check(near(us.state.obstacleCm, 30, 0.01),
+        "la moyenne glissante converge vers la distance réelle (" + us.state.obstacleCm.toFixed(6) + " → 30, ±0,01 cm)");
+
+  // Cadence adaptative : capteur débranché → échecs à 200/400/600 ms,
+  // puis 1000 ms : 1600, 2600 (head.cpp l.108-113).
+  us = U.create(); us.setActif(false);
+  fois = [];
+  for (i = 0; i < 520; i++) { us.tick(80, true); if (us.state.mesureFaite) fois.push(us.state.derniereMesureMs); }
+  check(fois.join(",") === "200,400,600,1600,2600",
+        "capteur débranché : cadence 1000 ms après 3 échecs (" + fois.join(", ") + " ms)");
+  check(us.state.cadenceMs === 1000 && us.state.obstacleCm === -1 && !us.state.obstacleWarn,
+        "débranché : cadence affichée 1000 ms, distance invalide, pas d'alerte");
+  // Retour à 200 ms dès qu'un écho revient.
+  us.setActif(true);
+  us.tickMany(201, 50, true);   // 1 s + 1 pas : la mesure d'échéance réussit
+  check(us.state.cadenceMs === 200 && us.state.failStreak === 0 && us.state.obstacleCm === 50,
+        "écho de retour → cadence 200 ms immédiate, moyenne re-amorcée à 50");
+
+  // Un timeout n'empoisonne pas la moyenne : 40 cm (amorce), timeouts,
+  // puis 60 cm → moy = 40 + (60 − 40)/5 = 44 à la mesure suivante.
+  us = U.create();
+  us.tickMany(120, 40, true);          // 3 mesures à 40 cm → moy = 40
+  us.tickMany(400, 200, true);         // 200 cm : timeout (200×58 > 9500 µs)
+  check(us.state.obstacleCm === -1 && !us.state.obstacleWarn,
+        "timeout : distance invalide publiée, pas d'alerte");
+  us.tickMany(120, 60, true);          // prochaine échéance (cadence 1000 ms)
+  check(near(us.state.obstacleCm, 44, 1e-12),
+        "timeout non injecté : moyenne reprise en l'état (" + us.state.obstacleCm.toFixed(2) + " = 40 + (60−40)/5)");
+
+  // Portée utile : 160 cm → écho reçu (9280 ≤ 9500 µs) mais lissée > 150 cm
+  // → « hors portée » SANS compter un échec ; 170 cm → timeout (échec).
+  us = U.create();
+  us.tickMany(40, 160, true);
+  check(us.state.obstacleCm === -1 && us.state.failStreak === 0,
+        "160 cm : écho reçu mais hors portée (obstacleCm = −1, pas d'échec)");
+  us = U.create();
+  us.tickMany(40, 170, true);
+  check(us.state.obstacleCm === -1 && us.state.failStreak === 1,
+        "170 cm : au-delà du timeout pulseIn (9860 > 9500 µs) → échec compté");
+
+  // Alerte < US_STOP_CM : warn + angle où l'obstacle a été vu (tête centrée
+  // en équilibre → pan 90°).
+  us = U.create();
+  us.tickMany(40, 20, true);
+  check(us.state.obstacleWarn === true && us.state.angleVu === 90,
+        "20 cm lissés → ALERTE, angle vu = pan 90° (tête centrée)");
+  us.tickMany(200, 80, true);
+  check(us.state.obstacleWarn === false && us.state.angleVu === -1,
+        "obstacle reparti → alerte et angle effacés");
+
+  // Tête : hors équilibre elle balaye (bornée 0…180° / 20…90°) ; en équilibre
+  // elle est ramenée au centre (90°/60°) à vitesse bornée 30°/s.
+  us = U.create();
+  var mn = 999, mx = -999;
+  for (i = 0; i < 4000; i++) {          // 20 s de balayage (robot au sol)
+    us.tick(80, false);
+    mn = Math.min(mn, us.state.headPanDeg); mx = Math.max(mx, us.state.headPanDeg);
+  }
+  check(mn === 0 && mx === 180,
+        "balayage hors équilibre : pan borné à 0…180° (vu " + mn + "…" + mx + ")");
+  for (i = 0; i < 600; i++) us.tick(80, true);   // 3 s d'équilibre
+  check(us.state.headPanDeg === 90 && us.state.headTiltDeg === 60,
+        "équilibre : tête ramenée au centre (90°/60°) et immobile");
   log("");
 
   var verdict = failures === 0 ? "AUTO-TEST RÉUSSI" : "AUTO-TEST ÉCHOUÉ (" + failures + " contrôle(s))";
