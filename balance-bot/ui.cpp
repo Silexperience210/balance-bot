@@ -488,7 +488,7 @@ FaceFrame faceCompute() {
   // Sécurité d'abord : IMU absente au boot, IMU qui décroche EN COURS, ou
   // cadence effondrée (mise en sécurité) → visage de détresse. Sans ça, un
   // robot dont l'IMU lâche gardait un visage impassible (FINAL_REVIEW constat 6).
-  if (!Balance::imuOk() || Balance::imuLost() || Balance::rateLow()) f.expr = FX_CHUTE;
+  if (!Balance::imuOk() || Balance::imuLost() || Balance::rateLow() || Balance::stalled()) f.expr = FX_CHUTE;
   else if (Balance::isFallen())   f.expr = FX_CHUTE;
   // Batterie faible : balance.cpp REFUSE l'armement (garde sur front montant,
   // REVIEW_CLAUDE M6) mais ne coupe plus un robot déjà debout — la teinte rouge
@@ -509,8 +509,8 @@ FaceFrame faceCompute() {
 // État du visage (blinks, clin d'œil de récupération, preview web)
 unsigned long s_nextBlink = 0, s_blinkUntil = 0, s_winkUntil = 0, s_winkCooldown = 0;
 bool          s_wasFallen = false;
-// Aperçu web : écrit depuis la tâche du banc (cœur 0), lu par la boucle
-// (cœur 1) → volatile, et s_faceForced publié EN DERNIER.
+// Aperçu web : écrit depuis la tâche du banc (tuner), lu par loop()
+// → volatile, et s_faceForced publié EN DERNIER.
 volatile bool          s_faceForced  = false;
 volatile FaceExpr      s_forcedExpr  = FX_CALME;
 volatile unsigned long s_forcedUntil = 0;
@@ -957,9 +957,36 @@ bool Ui::begin() {
   return true;
 }
 
+// ── Écran d'ARRÊT D'URGENCE ────────────────────────────────────────
+// Terminal : dessiné UNE fois, puis plus rien ne touche l'écran (ni le
+// tactile, ni le visage) jusqu'au RESET. Les roues sont déjà coupées par
+// Balance::emergencyStop() ; cet écran ne fait que le dire. Le fillScreen
+// (~22 ms) est sans conséquence : plus d'équilibre à protéger.
+static void drawEmergencyStop() {
+  g_tft.fillScreen(C_RED);
+  g_tft.setTextDatum(MC_DATUM);
+  g_tft.setTextColor(C_TEXT, C_RED);
+  g_tft.setTextSize(3);
+  g_tft.drawString("ARRET", WIDTH / 2, 50);
+  g_tft.drawString("D'URGENCE", WIDTH / 2, 80);
+  g_tft.setTextSize(2);
+  g_tft.drawString("roues coupees", WIDTH / 2, 115);
+  g_tft.drawString("RESET pour repartir", WIDTH / 2, 140);
+  g_tft.setTextSize(1);
+  g_tft.drawString("bouton BOOT tenu > 1 s  -  relacher BOOT avant RESET", WIDTH / 2, 160);
+  g_tft.setTextDatum(TL_DATUM);
+}
+
 // ── loop() ────────────────────────────────────────────────────────
 void Ui::loop() {
   if (!g_initialized) return;
+
+  // Arrêt d'urgence : écran figé jusqu'au RESET, rien d'autre.
+  static bool s_estopDrawn = false;
+  if (Balance::emergencyStopped()) {
+    if (!s_estopDrawn) { s_estopDrawn = true; drawEmergencyStop(); }
+    return;
+  }
 
   ensureAutoSleepOff();   // auto-réparation du correctif anti-blocage (10 s)
 
@@ -1103,7 +1130,8 @@ void Ui::loop() {
   // 4d. État principal — « CHUTE » signale la VRAIE chute (verrou de
   // Balance), pas un obstacle : l'obstacle a son propre état « OBST. ».
   int state = 0;
-  if (Balance::isEnabled() && Balance::isFallen()) state = 2;
+  if (Balance::stalled())        state = 6;   // surveillance : roues coupées, boucle figée
+  else if (Balance::isEnabled() && Balance::isFallen()) state = 2;
   else if (g_state.batteryLow)   state = 5;   // armement refusé / à poser (cf. balance.cpp M6)
   else if (g_state.obstacleWarn) state = 4;
   else if (g_state.balancing)    state = 1;
@@ -1118,6 +1146,7 @@ void Ui::loop() {
       case 3: s = "ARME";        col = C_ORANGE; break;
       case 4: s = "OBST.";       col = C_ORANGE; break;
       case 5: s = "BAT. FAIBLE"; col = C_RED;    break;
+      case 6: s = "FIGEE";       col = C_RED;    break;
     }
     updateLabel(240, 8, 74, s, col);
   }
@@ -1162,5 +1191,5 @@ void Ui::previewFace(uint8_t expr, unsigned long ms, bool sweep) {
   // 60 s maxi : sans borne, /api/face?t=100000 confisquait l'écran pendant
   // 27 h et rendait l'écran MANUEL inaccessible (FACE_REVIEW.md constat 9).
   s_forcedUntil = millis() + (ms > 60000UL ? 60000UL : ms);
-  s_faceForced  = true;              // publié EN DERNIER (cœur 0 → cœur 1)
+  s_faceForced  = true;              // publié EN DERNIER (tâche tuner → loop())
 }

@@ -7,6 +7,26 @@
 // ═══════════════════════════════════════════════════════════════════
 
 // ── État partagé du robot (mis à jour par chaque module) ────────────
+//
+// ACCÈS CONCURRENT (BALANCE_SPLIT_CORES=1) — méthode retenue : « un mot
+// machine, un seul écrivain ». Chaque champ est un scalaire ≤ 32 bits
+// naturellement aligné : sur Xtensa LX7 une lecture/écriture d'un tel mot
+// est ATOMIQUE (jamais de valeur « à moitié écrite »), ni mutex ni section
+// critique nécessaires. Chaque champ n'a qu'UN écrivain (tableau ci-dessous),
+// l'autre cœur ne fait que lire ; aucune décision ne dépend de la cohérence
+// de DEUX champs lus ensemble (cmdForward/cmdTurn sont lissés, un pas de
+// décalage entre eux est invisible). Seule exception : cmdEnabled, écrit par
+// l'UI/le banc web (armer) ET par la boucle (refus sur batterie faible) —
+// un bool, dernier écrivain gagnant, et c'est le comportement voulu.
+// Les drapeaux d'arrêt sûr (balLastStepMs, estop) sont volatile : leur
+// lecteur boucle dessus, le compilateur ne doit pas les mettre en registre.
+//
+//   écrivain = tâche d'équilibre (cœur 0) : balancing, pitchDeg, balanceHz,
+//     footLDeg, footRDeg, dbgBalMs, dbgBalMaxMs, balLastStepMs
+//     (dbgBalMs est aussi remis à zéro chaque seconde par loop() :
+//     diagnostic seul, un maximum perdu est sans conséquence)
+//   écrivain = loop() / cœur 1 : tout le reste (UI, tête, batterie, tuner,
+//     diagnostic, évitement, estop)
 struct BotState {
   // boucle d'équilibre (module A)
   bool  balancing = false;   // vrai quand le robot tient debout
@@ -50,6 +70,17 @@ struct BotState {
   int   headTiltDeg= 60;     // position courante tilt
   float obstacleCm = -1.0f;  // distance mesurée (-1 = hors portée)
   bool  obstacleWarn = false;// vrai si obstacle < US_STOP_CM
+  bool  obstacleSlow = false;// vrai si US_STOP_CM ≤ obstacle < US_SLOW_CM
+  int8_t obstacleSide = 0;   // côté où l'obstacle a été vu : -1 pan<90, +1 pan>90, 0 en face/inconnu
+  // Évitement (module C, calculé sur le cœur 1 ; consommé par balance.cpp
+  // AVANT le lissage des consignes — jamais sur le PID) :
+  int   avoidFwdMax = 100;   // plafond de cmdForward : 100 libre, 40 ralenti, 0 stop, <0 recul imposé
+  int   avoidTurn   = 0;     // pivot imposé si l'UI ne tourne pas (-100..100, 0 = aucun)
+  uint8_t avoidPhase = 0;    // 0 libre · 1 ralenti · 2 recul+pivot · 3 pivot seul (recul épuisé)
+  // Arrêt sûr : date (millis) du dernier DÉPART de pas d'équilibre — écrit par
+  // la boucle à chaque pas, lu par la surveillance de loop() (cœur 1).
+  volatile uint32_t balLastStepMs = 0;
+  volatile bool estop = false;   // arrêt d'urgence verrouillé (RESET pour repartir)
   // horloge de rendu UI (ms) — pour ne rafraîchir que si changement
   unsigned long uiTick = 0;
 };
@@ -57,8 +88,9 @@ struct BotState {
 extern BotState g_state;     // instance globale unique, définie dans le .ino
 
 // ── Module A : équilibre (imu.h / balance.h / feet.h) ──────────────
-// Implémente : IMU MPU6050 sur I2C, filtre, PID 200 Hz, pieds en arc
-// sur servos de POSITION (mécanique v3.1 — plus de roues).
+// Implémente : IMU MPU6050 sur I2C, filtre, PID 200 Hz, roues sur servos
+// à rotation CONTINUE (FEET_MODE_CONTINUOUS=1, robot réel) ou pieds en
+// arc sur servos de position (=0, ancienne mécanique v3.1).
 namespace Balance {
   bool  begin();                 // init IMU + servos ; false si IMU absent
   void  loop();                  // 1 itération 200 Hz (appelée par le .ino)
@@ -80,6 +112,18 @@ namespace Balance {
   void  setOutScale(float k);
   float getOutScale();
   float pitchRateDps();          // dernière vitesse gyro (°/s) — télémétrie
+  // ── Arrêt sûr ──────────────────────────────────────────────────
+  // Surveillance appelée par loop() (cœur 1) à chaque itération : si la
+  // boucle d'équilibre n'a pas démarré de pas depuis BALANCE_STALL_MS,
+  // coupe les roues (PWM détaché) depuis ce cœur-ci. Renvoie true tant
+  // que la coupure est active. La boucle, si elle repart, réarme seule.
+  bool  watchdog(unsigned long nowMs);
+  bool  stalled();               // coupure « boucle figée » en cours
+  // Arrêt d'urgence (bouton PIN_ESTOP) : roues coupées immédiatement,
+  // verrouillé jusqu'au RESET — aucune reprise logicielle possible.
+  void  emergencyStop();
+  bool  emergencyStopped();
+  bool  wheelsCut();             // PWM des roues détaché (chute, figée ou estop)
 }
 
 // ── Module D : banc de réglage web (tuner.h) ───────────────────────
@@ -87,7 +131,7 @@ namespace Balance {
 // Entièrement inerte tant qu'aucun client ne sollicite le serveur.
 namespace Tuner {
   bool  begin();                 // ouvre l'AP « BalanceBot-Tune » ; false si échec
-  void  loop();                  // no-op : le serveur vit sur sa propre tâche (cœur 0) ; conservé pour le contrat
+  void  loop();                  // no-op : le serveur vit sur sa propre tâche (TUNER_TASK_CORE) ; conservé pour le contrat
   bool  active();                // true si un client a dialogué récemment
 }
 

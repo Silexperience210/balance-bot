@@ -1,10 +1,22 @@
 // ═══════════════════════════════════════════════════════════════════
 // BalanceBot — sketch principal (assemblage)
-// T-Display-S3-Touch (ESP32-S3) · 2 pieds en arc + 2 pan/tilt (SG90)
-// · MPU6050 (I2C) · HC-SR04 · châssis imprimé ₿
+// T-Display-S3-Touch (ESP32-S3) · 2 roues sur servos continus + tête
+// pan/tilt (SG90) · MPU6050 (I2C) · HC-SR04 · châssis imprimé ₿
 //
-// Ce fichier est écrit par Hermes (orchestrateur). Les agents coding
-// implémentent UNIQUEMENT les .cpp de leur module contre interfaces.h.
+// RÉPARTITION SUR LES DEUX CŒURS (BALANCE_SPLIT_CORES = 1, config.h) :
+//   cœur 0, tâche « balance », priorité BALANCE_TASK_PRIO :
+//       capteur d'assiette → correcteur → roues, à BALANCE_LOOP_HZ,
+//       cadencée par vTaskDelayUntil (période exacte, sans dérive) ;
+//   cœur 1, loop() Arduino : écran (60 Hz), tête + ultrason (50 Hz —
+//       le pulseIn() bloquant y vit désormais sans toucher l'équilibre),
+//       batterie (1 Hz), boutons, surveillance de la boucle d'équilibre.
+//   Le banc web (tuner.cpp) garde sa propre tâche, déplacée sur le cœur 1.
+// Avec BALANCE_SPLIT_CORES = 0 : tout dans loop(), comme avant (repli).
+// Dans les deux cas Balance::loop() est appelée à la MÊME cadence, avec
+// la MÊME loi de commande : seul l'appelant change.
+//
+// PARTAGE DE DONNÉES : uniquement via g_state (BotState, interfaces.h),
+// « un mot machine, un seul écrivain » — voir le commentaire du struct.
 // ═══════════════════════════════════════════════════════════════════
 #include <Arduino.h>
 
@@ -15,6 +27,36 @@
 // État global unique — défini ICI, déclaré extern dans interfaces.h
 BotState g_state;
 
+// ── Un pas d'équilibre, avec sa mesure de durée ─────────────────────
+// Partagé par les deux modes de compilation : la tâche (cœur 0) ou la
+// phase de loop() (mono-cœur) appellent exactement ceci.
+static inline void balanceStep() {
+  const unsigned long t0 = micros();
+  Balance::loop();
+  const unsigned long dt = (micros() - t0) / 1000UL;
+  if (dt > g_state.dbgBalMs)    g_state.dbgBalMs    = (uint8_t)min(dt, 255UL);
+  if (dt > g_state.dbgBalMaxMs) g_state.dbgBalMaxMs = (uint16_t)min(dt, 65535UL);
+}
+
+#if BALANCE_SPLIT_CORES
+// ── Tâche d'équilibre (cœur BALANCE_TASK_CORE) ──────────────────────
+// vTaskDelayUntil : réveil à t0 + n·période, sans accumuler de retard.
+// FreeRTOS tourne à 1000 Hz (CONFIG_FREERTOS_HZ) → 200 Hz = 5 ticks
+// exacts. La tâche cède le cœur entre deux pas : l'IDLE0 tourne (le
+// watchdog de tâche surveille l'IDLE du cœur 0), le WiFi (priorité 23)
+// aussi. Aucun Serial ici : USB-CDC peut bloquer (STALL_ANALYSIS.md §6).
+static TaskHandle_t s_balanceTask = nullptr;
+
+static void balanceTask(void*) {
+  TickType_t last = xTaskGetTickCount();
+  const TickType_t period = pdMS_TO_TICKS(1000 / BALANCE_LOOP_HZ);
+  for (;;) {
+    vTaskDelayUntil(&last, period);
+    balanceStep();
+  }
+}
+#endif
+
 void setup() {
   Serial.begin(115200);
   delay(200);
@@ -24,8 +66,10 @@ void setup() {
   pinMode(PIN_POWER_ON, OUTPUT);
   digitalWrite(PIN_POWER_ON, HIGH);
 
-  // Bouton BOOT : appui long = ouvre/ferme le banc de réglage web.
-  pinMode(PIN_BUTTON_1, INPUT_PULLUP);
+  // Boutons : BOOT (GPIO 0) = ARRÊT D'URGENCE (appui > ESTOP_HOLD_MS),
+  // KEY (GPIO 14) = ouvrir/fermer le banc de réglage web (appui long).
+  pinMode(PIN_ESTOP, INPUT_PULLUP);
+  pinMode(PIN_TUNER_TOGGLE, INPUT_PULLUP);
 
   Battery::begin();
 
@@ -42,6 +86,19 @@ void setup() {
   // Un échec n'empêche pas le boot : Tuner::loop() devient un no-op et
   // le robot se comporte exactement comme sans ce module.
   Tuner::begin();
+
+#if BALANCE_SPLIT_CORES
+  // Lancée en DERNIER : tous les begin() (I2C, servos, NVS) sont faits,
+  // la tâche ne partage plus rien d'autre que g_state avec ce cœur.
+  const BaseType_t ok = xTaskCreatePinnedToCore(
+      balanceTask, "balance", BALANCE_TASK_STACK, nullptr,
+      BALANCE_TASK_PRIO, &s_balanceTask, BALANCE_TASK_CORE);
+  if (ok == pdPASS) Serial.printf("ÉQUILIBRE : tâche sur le cœur %d, priorité %d, %d Hz\n",
+                                  BALANCE_TASK_CORE, (int)BALANCE_TASK_PRIO, BALANCE_LOOP_HZ);
+  else              Serial.println("ÉQUILIBRE : ÉCHEC de création de la tâche — ROUES INERTES");
+#else
+  Serial.println("ÉQUILIBRE : mono-cœur (BALANCE_SPLIT_CORES = 0), dans loop()");
+#endif
 
   Serial.println("═══ BalanceBot prêt ═══");
 }
@@ -72,19 +129,36 @@ void loop() {
     g_state.dbgLastGapLoopMs = s_prevLoopMs;
   }
 
-  // ── Boucle d'équilibre : 200 Hz ─────────────────────────────────
+#if !BALANCE_SPLIT_CORES
+  // ── Boucle d'équilibre : 200 Hz (mono-cœur) ─────────────────────
   // Toujours active même à l'arrêt : Balance::loop() mesure l'IMU en
   // continu (le PITCH affiché vit même sans équilibre) et ne pilote les
-  // pieds que si l'équilibre est activé.
+  // roues que si l'équilibre est activé.
   static unsigned long tBalance = 0;
   if (nowMs - tBalance >= (1000UL / BALANCE_LOOP_HZ)) {
     tBalance = nowMs;
-    unsigned long t0 = micros();
-    Balance::loop();
-    unsigned long dt = (micros() - t0) / 1000UL;
-    if (dt > g_state.dbgBalMs) g_state.dbgBalMs = (uint8_t)min(dt, 255UL);
-    if (dt > g_state.dbgBalMaxMs) g_state.dbgBalMaxMs = (uint16_t)min(dt, 65535UL);
+    balanceStep();
     s_lastPhase = 0;
+  }
+#else
+  // ── Surveillance de la boucle d'équilibre (cœur 0) ──────────────
+  // Filet rendu possible par la séparation : si la tâche ne démarre plus
+  // de pas pendant BALANCE_STALL_MS, ses roues sont coupées D'ICI.
+  (void)Balance::watchdog(nowMs);
+#endif
+
+  // ── Arrêt d'urgence matériel : BOOT tenu > ESTOP_HOLD_MS ────────
+  // Roues coupées, écran « ARRÊT » (Ui::loop), verrouillé jusqu'au RESET.
+  // Vérifié AVANT l'écran et la tête : rien ne doit passer devant.
+  {
+    static unsigned long estopDownMs = 0;
+    static bool estopPrev = false;
+    const bool estopNow = (digitalRead(PIN_ESTOP) == LOW);
+    if (estopNow && !estopPrev) estopDownMs = nowMs;
+    else if (estopNow && !g_state.estop && (nowMs - estopDownMs >= ESTOP_HOLD_MS)) {
+      Balance::emergencyStop();
+    }
+    estopPrev = estopNow;
   }
 
   // ── UI : 60 Hz (au lieu de « en continu ») ───────────────────────
@@ -104,8 +178,8 @@ void loop() {
                        // Ui::loop() était étiqueté « phase 0 = balance »
   }
 
-  // ── Tête + ultrason : 50 Hz (l'ultrason est auto-cadencé à 10 Hz
-  // en interne ; 50 Hz de mouvement pan/tilt est fluide pour des SG90) ──
+  // ── Tête + ultrason : 50 Hz (l'ultrason est auto-cadencé à 200 ms /
+  // 1 s en interne ; 50 Hz de mouvement pan/tilt est fluide pour des SG90) ──
   static unsigned long tHead = 0;
   if (nowMs - tHead >= 20) {
     tHead = nowMs;
@@ -118,25 +192,24 @@ void loop() {
   }
 
   // ── Banc de réglage web ─────────────────────────────────────────
-  // Le serveur HTTP vit sur sa propre tâche (cœur 0) : plus rien à
-  // cadencer ici, la boucle d'équilibre ne peut plus être gelée par un
-  // client TCP lent. Appui long (~1,5 s) sur BOOT = ouvrir/fermer l'AP.
-  static unsigned long bootDownMs = 0;
-  static bool bootDone = false;
-  static bool bootPrev = false;
-  const bool bootNow = (digitalRead(PIN_BUTTON_1) == LOW);
-  if (bootNow && !bootPrev) {
-    bootDownMs = nowMs;
-    bootDone = false;
-  } else if (bootNow && !bootDone && (nowMs - bootDownMs >= 1500)) {
-    bootDone = true;
-    // Aucun Serial ici (cœur 1, chemin chaud — STALL_ANALYSIS.md §6,
-    // REVIEW_CLAUDE M14) : la trace « OUVERT / FERMÉ » est écrite par la
-    // tâche du tuner (cœur 0).
+  // Le serveur HTTP vit sur sa propre tâche (TUNER_TASK_CORE) : plus rien
+  // à cadencer ici. Appui long (TUNER_TOGGLE_HOLD_MS) sur KEY (GPIO 14)
+  // = ouvrir/fermer l'AP. (BOOT est réservé à l'arrêt d'urgence.)
+  static unsigned long keyDownMs = 0;
+  static bool keyDone = false;
+  static bool keyPrev = false;
+  const bool keyNow = (digitalRead(PIN_TUNER_TOGGLE) == LOW);
+  if (keyNow && !keyPrev) {
+    keyDownMs = nowMs;
+    keyDone = false;
+  } else if (keyNow && !keyDone && (nowMs - keyDownMs >= TUNER_TOGGLE_HOLD_MS)) {
+    keyDone = true;
+    // Aucun Serial ici (STALL_ANALYSIS.md §6, REVIEW_CLAUDE M14) : la
+    // trace « OUVERT / FERMÉ » est écrite par la tâche du tuner.
     (void)Tuner::toggle();
     s_lastPhase = 3;
   }
-  bootPrev = bootNow;
+  keyPrev = keyNow;
 
   // Batterie : lecture 1×/seconde (état global pour l'UI)
   static unsigned long tBat = 0;

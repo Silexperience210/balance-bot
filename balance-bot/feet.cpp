@@ -1,11 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════
-// BalanceBot — module A · pieds en arc (SG90 position OU servo continu)
+// BalanceBot — module A · roues (servo continu, robot réel) OU pieds en
+// arc (SG90 position, ancienne v3.1)
 //
-// Mécanique (chassis/NOTES_v3.md) : plus de roues. Chaque pied est
-// un arc de cercle de rayon R = 32.5 mm, ouverture 200°, vissé sur le
-// palonnier du servo. L'arc ROULE sur le sol : quand le servo tourne de
-// φ, le robot se déplace de R·φ (32.5 mm par radian, soit 0.567 mm par
-// degré de pied).
+// Mécanique RÉELLE (chassis/NOTES_v3.md, photo docs/photos/robot-reel.jpg) :
+// deux roues Ø ≈ 65 mm sur servos 9 g à rotation continue. Le nom
+// « pied » et la course φ (°) sont conservés : pour l'équilibre, une roue
+// est un arc de rayon R qui roule sans limite de course — quand le servo
+// tourne de φ, le robot se déplace de R·φ.
+// (Historique v3.1 : arc de rayon 32.5 mm, ouverture 200°, course FINIE.)
 //
 // NEUTRE MÉCANIQUE — décision documentée :
 //   servo à 90° (kServoNeutralDeg) = milieu de l'arc vers le bas =
@@ -14,25 +16,26 @@
 //   donc « angle de pied = 0 » ⇔ « servo = 90° », et l'angle de repos
 //   du robot droit vaut 0.0°.
 //
-// DÉBATTEMENT — l'arc couvre ±100° autour du bas, le servo ±90° : il
-// reste 10° de marge mécanique. La butée DURE interne de ce module est
-// volontairement plus serrée (±kFootHardDeg = 45°) : c'est un garde-fou
-// de dernier recours. La limite fine, qui dépend du tangage courant,
-// est calculée par balance.cpp (le pied et le corps consomment le même
-// arc : contact ≈ φ + θ).
+// DÉBATTEMENT (arc, FOOT_TRAVEL_LIMITED) — l'arc couvre ±100° autour du
+// bas, le servo ±90° : il reste 10° de marge mécanique. La butée DURE
+// interne de ce module est volontairement plus serrée (±kFootHardDeg =
+// 45°) : garde-fou de dernier recours. La limite fine, qui dépend du
+// tangage courant, est calculée par balance.cpp (le pied et le corps
+// consomment le même arc : contact ≈ φ + θ). Avec des ROUES la course est
+// libre : ces garde-fous sont compilés hors (config.h).
 //
 // DEUX MATÉRIELS, un seul module — choisis par FEET_MODE_CONTINUOUS
 // (config.h) :
-//   • mode POSITION (=0, SG90 standard) : le servo ne connaît que la
-//     POSITION. Ce module intègre la vitesse demandée par le PID (°/s)
-//     en position (°), au dt réel, et écrit l'angle.
-//   • mode CONTINU (=1, servo 360°) : le servo ne connaît que la
-//     VITESSE (1500 µs = arrêt). La consigne du PID est déjà une
+//   • mode CONTINU (=1, servo 360°, ROBOT RÉEL) : le servo ne connaît que
+//     la VITESSE (1500 µs = arrêt). La consigne du PID est déjà une
 //     vitesse : elle part DIRECTEMENT au servo. L'équilibre y devient
 //     réellement tenable, le moteur fournissant un couple continu.
-// Dans LES DEUX cas φ (position du pied) reste intégré ici : l'arc a une
-// course finie même quand le moteur n'en a plus, et c'est φ que lisent la
-// butée dure interne et le soft clamp de balance.cpp (Feet::angleAvg()).
+//   • mode POSITION (=0, SG90 standard, v3.1) : le servo ne connaît que
+//     la POSITION. Ce module intègre la vitesse demandée par le PID (°/s)
+//     en position (°), au dt réel, et écrit l'angle.
+// Dans LES DEUX cas φ (course parcourue) reste intégré ici : c'est φ que
+// lit la cascade de recentrage de balance.cpp (Feet::angleAvg()) — et, en
+// mode arc, la butée dure et le soft clamp.
 // ═══════════════════════════════════════════════════════════════════
 #include "feet.h"
 #include "config.h"
@@ -73,6 +76,14 @@ constexpr float kDtMaxS = 0.050f;
 Servo s_left;
 Servo s_right;
 bool  s_ready = false;
+// Coupure de sécurité (PWM détaché). volatile : écrit par une autre tâche
+// (surveillance de loop()), lu à chaque driveFootSpeed().
+volatile bool s_cut = false;
+// Section critique autour des écritures servo : cut() peut arriver d'un
+// autre cœur pendant un driveFootSpeed() — les deux ne doivent pas
+// s'entrelacer (attach/detach vs write sur le même canal LEDC).
+portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
+SemaphoreHandle_t s_cfg = nullptr;      // transitions attach/detach (cf. cut/rearm)
 
 // Position des pieds dans le repère ROBOT (0 = repos, + = avant).
 float s_footL = 0.0f;
@@ -92,11 +103,13 @@ inline int footToUs(float footDeg, float dir, float trimDeg) {
   return (int)lroundf(us);
 }
 
-// Écrit les deux positions courantes sur les servos.
+// Écrit les deux positions courantes sur les servos (mode position seul).
+#if !FEET_MODE_CONTINUOUS
 void writePositions() {
   s_left.writeMicroseconds(footToUs(s_footL, kDirL, kTrimDegL));
   s_right.writeMicroseconds(footToUs(s_footR, kDirR, kTrimDegR));
 }
+#endif
 
 #if FEET_MODE_CONTINUOUS
 // ── CALIBRATION servo à ROTATION CONTINUE ──────────────────────────
@@ -165,6 +178,8 @@ bool begin() {
 
   s_footL = 0.0f;
   s_footR = 0.0f;
+  s_cut = false;
+  if (s_cfg == nullptr) s_cfg = xSemaphoreCreateMutex();
   s_lastMicros = micros();
 #if FEET_MODE_CONTINUOUS
   if (s_ready) writeNeutral();          // servos à l'arrêt dès le boot
@@ -175,7 +190,7 @@ bool begin() {
 }
 
 void driveFootSpeed(int leftDegS, int rightDegS) {
-  if (!s_ready) return;
+  if (!s_ready || s_cut) return;
 
   const unsigned long now = micros();
   float dt = (now - s_lastMicros) * 1e-6f;   // non signé : gère le rollover
@@ -186,12 +201,20 @@ void driveFootSpeed(int leftDegS, int rightDegS) {
   float vR = clampf((float)rightDegS, -kSpeedMaxDegS, kSpeedMaxDegS);
 
   // Intégration de φ — conservée dans les DEUX modes : en continu elle ne
-  // pilote plus le servo, mais elle reste la seule mesure de la course
-  // consommée sur l'arc (butée dure ci-dessous, soft clamp de balance.cpp).
+  // pilote plus le servo, mais elle reste la mesure (conventionnelle) de la
+  // course parcourue, que lit la cascade de recentrage de balance.cpp.
+#if FOOT_TRAVEL_LIMITED
+  // Arc à course finie : φ est écrêté à la butée dure.
   s_footL = clampf(s_footL + vL * dt, -kFootHardDeg, kFootHardDeg);
   s_footR = clampf(s_footR + vR * dt, -kFootHardDeg, kFootHardDeg);
+#else
+  // Roue : la course est libre, φ n'est pas borné (sim MODE = "roue").
+  s_footL += vL * dt;
+  s_footR += vR * dt;
+#endif
 
 #if FEET_MODE_CONTINUOUS
+#if FOOT_TRAVEL_LIMITED
   // En position, écrêter φ suffisait à arrêter le pied à la butée. En
   // continu le moteur, lui, continuerait de tourner : il faut couper
   // explicitement la commande qui pousse au-delà.
@@ -199,33 +222,109 @@ void driveFootSpeed(int leftDegS, int rightDegS) {
   if (s_footL <= -kFootHardDeg && vL < 0.0f) vL = 0.0f;
   if (s_footR >=  kFootHardDeg && vR > 0.0f) vR = 0.0f;
   if (s_footR <= -kFootHardDeg && vR < 0.0f) vR = 0.0f;
-  writeSpeeds(vL, vR);
+#endif
+  portENTER_CRITICAL(&s_mux);
+  if (!s_cut) writeSpeeds(vL, vR);      // re-testé SOUS le verrou (cut() concurrent)
+  portEXIT_CRITICAL(&s_mux);
 #else
-  writePositions();
+  portENTER_CRITICAL(&s_mux);
+  if (!s_cut) writePositions();
+  portEXIT_CRITICAL(&s_mux);
 #endif
 }
 
 void stop() {
-  if (!s_ready) return;
+  if (!s_ready || s_cut) return;
   s_lastMicros = micros();
+  portENTER_CRITICAL(&s_mux);
+  if (!s_cut) {
 #if FEET_MODE_CONTINUOUS
-  // Continu : « la dernière position » n'existe pas — la seule commande
-  // d'arrêt est le neutre 1500 µs. φ reste à sa valeur : le pied ne
-  // bouge plus, la course consommée sur l'arc non plus.
+    // Continu : « la dernière position » n'existe pas — la seule commande
+    // d'arrêt est le neutre 1500 µs. φ reste à sa valeur : la roue ne
+    // tourne plus, la course intégrée non plus.
+    writeNeutral();
+#else
+    // Position CONSERVÉE : un retour au neutre ferait basculer le robot.
+    // On réécrit quand même la consigne pour que le servo tienne son
+    // couple, et on repart d'un dt propre au prochain driveFootSpeed().
+    writePositions();
+#endif
+  }
+  portEXIT_CRITICAL(&s_mux);
+}
+
+// ── Coupure de sécurité ────────────────────────────────────────────
+// Deux niveaux de protection :
+//   · le spinlock s_mux + le drapeau s_cut : une fois le drapeau levé, plus
+//     AUCUNE écriture PWM ne part (testé sous le verrou) — le detach peut
+//     alors se faire sans qu'une écriture concurrente le croise ;
+//   · le mutex s_cfg : sérialise les TRANSITIONS attach/detach entre la
+//     boucle d'équilibre (rearm) et la surveillance de loop() (cut). Les
+//     appels LEDC d'attache/détache allouent et configurent (pas
+//     acceptables sous interruptions coupées), d'où un mutex et non le
+//     spinlock. cut() n'attend qu'un court délai : si la boucle tient le
+//     mutex trop longtemps (c'est justement qu'elle est figée), on
+//     détache quand même — une roue qui tourne au sol est pire qu'un état
+//     ESP32Servo à réinitialiser au RESET.
+constexpr TickType_t kCutMutexWaitTicks = pdMS_TO_TICKS(20);
+
+void cutLocked() {
+  s_left.detach();
+  s_right.detach();
+  // Détacher le canal LEDC ne garantit pas l'état de la broche : on la
+  // repasse en sortie basse = « pas d'impulsion » pour n'importe quel servo.
+  pinMode(SERVO_FOOT_L, OUTPUT);  digitalWrite(SERVO_FOOT_L, LOW);
+  pinMode(SERVO_FOOT_R, OUTPUT);  digitalWrite(SERVO_FOOT_R, LOW);
+}
+
+void cut() {
+  if (!s_ready) return;
+  // Mutex D'ABORD (un rearm() en cours se termine proprement, puis on
+  // coupe), le drapeau ENSUITE, sous le spinlock.
+  const bool locked = (s_cfg != nullptr) && xSemaphoreTake(s_cfg, kCutMutexWaitTicks) == pdTRUE;
+  portENTER_CRITICAL(&s_mux);
+  const bool already = s_cut;
+  s_cut = true;                          // dès ici : plus d'écriture PWM
+  portEXIT_CRITICAL(&s_mux);
+  if (!already) cutLocked();             // idempotente
+  if (locked) xSemaphoreGive(s_cfg);
+}
+
+// Ré-attache après une coupure, et écrit l'ARRÊT (neutre en continu, la
+// position courante en mode position). Boucle d'équilibre uniquement ;
+// attend la fin d'un cut() éventuellement en cours (quelques centaines
+// de µs au plus).
+void rearm() {
+  if (!s_ready || !s_cut) return;
+  if (s_cfg != nullptr) xSemaphoreTake(s_cfg, portMAX_DELAY);
+  if (!s_cut) {                          // coupé puis réarmé entre-temps ? non : rien à faire
+    if (s_cfg != nullptr) xSemaphoreGive(s_cfg);
+    return;
+  }
+  s_left.setPeriodHertz(50);
+  s_right.setPeriodHertz(50);
+  s_left.attach(SERVO_FOOT_L, (int)kServoMinUs, (int)kServoMaxUs);
+  s_right.attach(SERVO_FOOT_R, (int)kServoMinUs, (int)kServoMaxUs);
+  portENTER_CRITICAL(&s_mux);
+  s_cut = false;
+#if FEET_MODE_CONTINUOUS
   writeNeutral();
 #else
-  // Position CONSERVÉE : un retour au neutre ferait basculer le robot.
-  // On réécrit quand même la consigne pour que le servo tienne son
-  // couple, et on repart d'un dt propre au prochain driveFootSpeed().
   writePositions();
 #endif
+  portEXIT_CRITICAL(&s_mux);
+  if (s_cfg != nullptr) xSemaphoreGive(s_cfg);
+  s_lastMicros = micros();
 }
+
+bool isCut() { return s_cut; }
 
 void recenterNow() {
   if (!s_ready) return;
   s_footL = 0.0f;
   s_footR = 0.0f;
   s_lastMicros = micros();
+  if (s_cut) return;                    // rien à écrire sur un servo détaché
 #if FEET_MODE_CONTINUOUS
   // Continu : rien à « ramener » physiquement — le servo n'a pas de
   // position de consigne, et faire tourner les pieds pour rejoindre un
@@ -235,7 +334,9 @@ void recenterNow() {
   // via halt()). Le zéro de φ est donc conventionnel — il est redéfini
   // « ici, maintenant », ce qui est exactement ce que veut le soft clamp.
 #else
-  writePositions();
+  portENTER_CRITICAL(&s_mux);
+  if (!s_cut) writePositions();
+  portEXIT_CRITICAL(&s_mux);
 #endif
 }
 

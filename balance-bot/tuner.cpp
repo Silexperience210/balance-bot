@@ -23,6 +23,7 @@
 
 #include "tuner.h"
 #include "ui.h"          // aperçu du visage (/api/face)
+#include "config.h"      // TUNER_TASK_CORE
 #include <WiFi.h>
 #include <WebServer.h>
 
@@ -44,7 +45,7 @@ unsigned long  s_lastReqMs   = 0;
 bool           s_stationSeen = false;   // ≥1 station associée (cache 10 Hz)
 unsigned long  s_lastStationMs = 0;
 TaskHandle_t   s_task        = nullptr;
-volatile bool  s_announce    = false;   // toggle() → serverTask() trace l'état (cœur 0)
+volatile bool  s_announce    = false;   // toggle() → serverTask() trace l'état
 
 // ── Démarrage / arrêt de la radio (partagés par begin() et toggle()) ──
 bool startRadio() {
@@ -66,10 +67,10 @@ void stopRadio() {
   s_stationSeen = false;
 }
 
-// Trace série de l'état de la radio. JAMAIS depuis loop() (cœur 1) : une
-// écriture USB-CDC bloque quand l'hôte ne draine pas le port
-// (STALL_ANALYSIS.md §6). Appelée depuis setup() via begin(), et depuis
-// serverTask() (cœur 0) sur demande de toggle() — REVIEW_CLAUDE M14.
+// Trace série de l'état de la radio. JAMAIS depuis loop() : une écriture
+// USB-CDC bloque quand l'hôte ne draine pas le port (STALL_ANALYSIS.md
+// §6). Appelée depuis setup() via begin(), et depuis serverTask() sur
+// demande de toggle() — REVIEW_CLAUDE M14.
 void announce() {
   if (s_up) {
     Serial.print("BANC WEB  : OUVERT — SSID « ");
@@ -81,11 +82,15 @@ void announce() {
   }
 }
 
-// ── Tâche serveur (cœur 0, celui du WiFi) ───────────────────────────
+// ── Tâche serveur (TUNER_TASK_CORE) ─────────────────────────────────
 // Le serveur HTTP tournait dans loop(), sur le même fil que la boucle
 // d'équilibre : un client TCP lent (constantes HTTP_MAX_*_WAIT de la lib,
 // jusqu'à 5 s) pouvait geler l'asservissement. Ici il ne peut plus voler
 // de temps à la boucle — au pire il retarde sa propre télémétrie.
+// Cœur : avec BALANCE_SPLIT_CORES la boucle d'équilibre occupe le cœur 0
+// (priorité haute) ; cette tâche (priorité 1) passe alors sur le cœur 1
+// aux côtés de loop() — l'écran et la tête tolèrent une requête HTTP,
+// pas l'équilibre. En mono-cœur elle reste sur le cœur 0 comme avant.
 void serverTask(void*) {
   for (;;) {
     if (s_announce) {                    // appui long BOOT : la trace s'écrit ICI
@@ -322,9 +327,9 @@ bool begin() {
   s_server.on("/api/face",   HTTP_GET,  handleFace);
   s_server.onNotFound([]() { s_server.send(404, "text/plain", "404"); });
 
-  // Le serveur tourne sur SA tâche (cœur 0, celui du WiFi). Créée une fois
-  // pour toutes ; elle ne fait rien tant que la radio est fermée.
-  xTaskCreatePinnedToCore(serverTask, "tuner", 8192, nullptr, 1, &s_task, 0);
+  // Le serveur tourne sur SA tâche (TUNER_TASK_CORE). Créée une fois pour
+  // toutes ; elle ne fait rien tant que la radio est fermée.
+  xTaskCreatePinnedToCore(serverTask, "tuner", 8192, nullptr, 1, &s_task, TUNER_TASK_CORE);
 
   if (!startRadio()) {
     Serial.println("BANC WEB  : ÉCHEC softAP — tuner désactivé (appui long BOOT pour réessayer)");

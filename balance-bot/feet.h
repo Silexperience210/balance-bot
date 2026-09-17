@@ -2,15 +2,16 @@
 // ═══════════════════════════════════════════════════════════════════
 // BalanceBot — module A (équilibre) · en-tête PRIVÉ des pieds en arc
 //
-// Remplace wheels.h : la mécanique v3.1 n'a plus de roues. Deux arcs de
-// cercle (foot_arc.stl, rayon 32.5 mm) entraînés par des servos taille
-// SG90 roulent sur le sol.
+// Le nom « Feet » date de la mécanique v3.1 (pieds en arc sur SG90 de
+// position). Le robot RÉEL (v3, chassis/NOTES_v3.md) a deux ROUES sur
+// servos à rotation continue : même API, sélecteur FEET_MODE_CONTINUOUS
+// dans config.h.
 //
-// L'API est la MÊME pour les deux matériels supportés (sélecteur
-// FEET_MODE_CONTINUOUS dans config.h) : on commande toujours une VITESSE
-// de pied, et angleL/R/Avg renvoient toujours la course consommée sur
-// l'arc. Seule change la façon d'écrire sur le servo — position intégrée
-// (SG90 standard) ou vitesse directe (servo 360°).
+// L'API est la MÊME pour les deux matériels supportés : on commande
+// toujours une VITESSE de roue/pied, et angleL/R/Avg renvoient toujours
+// la course φ intégrée. Seule change la façon d'écrire sur le servo —
+// vitesse directe (servo 360°, robot réel) ou position intégrée (SG90
+// standard).
 //
 // Utilisé uniquement par balance.cpp — hors contrat public.
 // ═══════════════════════════════════════════════════════════════════
@@ -46,6 +47,20 @@ float angleL();
 float angleR();
 float angleAvg();      // moyenne des deux — grandeur utile au recentrage
 
-bool ready();          // true si les servos sont attachés
+bool ready();          // true si les servos sont attachés (même coupés, cf. cut)
+
+// ── Coupure de sécurité ────────────────────────────────────────────
+// cut() DÉTACHE le PWM des deux servos et force la broche à l'état bas :
+// plus aucune impulsion → un servo continu s'arrête quel que soit son
+// trim (le « neutre » 1500 µs, lui, peut ramper) ; un servo de position
+// devient libre. Appelée par balance.cpp (chute, arrêt d'urgence) et par
+// la surveillance de loop() sur un AUTRE cœur (boucle figée) — c'est la
+// seule écriture servo autorisée hors de la boucle d'équilibre, protégée
+// par une section critique. Tant que isCut(), driveFootSpeed()/stop()
+// sont des no-op. rearm() ré-attache et écrit le neutre — à n'appeler
+// que depuis la boucle d'équilibre.
+void cut();
+void rearm();
+bool isCut();
 
 } // namespace Feet

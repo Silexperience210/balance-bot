@@ -6,21 +6,27 @@
 // pieds roulent vers l'avant pour « rattraper » la chute, et
 // réciproquement.
 //
-//   pitch (IMU) ──► erreur = consigne − pitch ──► PID ──► vitesse PIED
+//   pitch (IMU) ──► erreur = consigne − pitch ──► PID ──► vitesse ROUE
 //                                        ▲                    │
 //                    cmdForward (UI) ────┘                    ▼
-//                    cmdTurn    (UI) ─────► différentiel   Feet:: (position)
+//                    cmdTurn    (UI) ─────► différentiel   Feet:: (vitesse)
+//                    évitement (tête) ────┘
 //                    cascade φ  ──────────┘  (θ_ref)
 //
-// MÉCANIQUE v3.1 : plus de roues, deux PIEDS EN ARC sur SG90 standard.
-// Un servo de position a un DÉBATTEMENT FINI : le PID ne peut plus
-// tourner indéfiniment. Deux mécanismes s'ajoutent donc ici :
-//   · un soft clamp qui annule la vitesse AVANT la butée ;
-//   · une CASCADE DE RECENTRAGE en vitesse (boucle externe 10 Hz sur la
-//     position de pied φ → consigne de vitesse ; boucle interne continue
-//     → θ_ref). Elle ne court-circuite JAMAIS le PID.
+// MÉCANIQUE RÉELLE (v3) : deux ROUES sur servos à rotation continue
+// (FEET_MODE_CONTINUOUS=1, config.h). La sortie du PID est une VITESSE
+// de roue, envoyée telle quelle. Une CASCADE DE RECENTRAGE en vitesse
+// (boucle externe 10 Hz sur la course φ → consigne de vitesse ; boucle
+// interne continue → θ_ref) ramène le robot vers son point de départ ;
+// elle ne court-circuite JAMAIS le PID.
+// Ancienne mécanique v3.1 (pieds en ARC sur SG90 de position, course
+// FINIE) : un soft clamp annule la vitesse avant la butée et un « panic »
+// coupe si le pied est trop loin — compilés seulement si
+// FOOT_TRAVEL_LIMITED (config.h). Une roue n'a pas de butée.
 //
-// Cadencé à BALANCE_LOOP_HZ (200 Hz) par le .ino ; aucun delay() ici.
+// Cadencé à BALANCE_LOOP_HZ (200 Hz) par le .ino — dans sa propre tâche
+// sur le cœur BALANCE_TASK_CORE si BALANCE_SPLIT_CORES ; aucun delay() ici.
+// AUCUN Serial dans loop() : USB-CDC peut bloquer (STALL_ANALYSIS.md §6).
 // ═══════════════════════════════════════════════════════════════════
 #include <Arduino.h>
 #include <Preferences.h>
@@ -250,6 +256,10 @@ float s_lastRateDps = 0.0f;        // dernière vitesse gyro (télémétrie web)
 unsigned long s_lastMicros   = 0;
 unsigned long s_uprightSince = 0;  // début de la fenêtre de redressement
 bool          s_rateLow      = false;  // boucle trop lente → arrêt de sécurité
+// Coupure « boucle figée » posée par Balance::watchdog() depuis loop()
+// (autre cœur) : la boucle, quand elle repart, réarme les roues et
+// repart propre (halt). volatile : écrit ailleurs, lu à chaque pas.
+volatile bool s_stallCut     = false;
 
 // ── Gains persistants (NVS) ────────────────────────────────────────
 // Sans ça, chaque reset repart sur les valeurs de compilation et tout le
@@ -297,6 +307,15 @@ void halt() {
   g_state.balancing = false;
 }
 
+// halt() + roues COUPÉES (PWM détaché) : chute, arrêt d'urgence. Un robot
+// par terre ne doit pas avoir une roue qui tourne dans le vide — et un
+// servo continu au « neutre » peut ramper si son trim n'est pas parfait.
+// Le réarmement (Feet::rearm) n'a lieu qu'au redressement vérifié.
+void haltAndCut() {
+  halt();
+  Feet::cut();
+}
+
 // Recopie la position des pieds dans l'état partagé (affichage UI).
 inline void publishFeet() {
   g_state.footLDeg = (int)lroundf(Feet::angleL());
@@ -306,12 +325,19 @@ inline void publishFeet() {
 // Soft clamp de butée : réduit la vitesse demandée à mesure que le pied
 // approche de sa limite, et seulement si la commande pousse ENCORE plus
 // loin. Rentrer vers le centre reste toujours à pleine autorité.
+// Roues (FOOT_TRAVEL_LIMITED = 0) : pas de butée, la commande passe telle
+// quelle — c'est ce que fait le sim en MODE = "roue".
 inline float limitTowardStop(float out, float footAvg, float pitch) {
+#if FOOT_TRAVEL_LIMITED
   const float limit = fminf(kFootHardDeg, 90.0f - fabsf(pitch) - kFootMarginDeg);
   if (out * footAvg <= 0.0f) return out;          // on revient vers 0 : libre
   const float headroom = limit - fabsf(footAvg);
   const float k = constrain(headroom / kFootTaperDeg, 0.0f, 1.0f);
   return out * k;
+#else
+  (void)footAvg; (void)pitch;
+  return out;
+#endif
 }
 
 // Boucle EXTERNE de la cascade, appelée à 10 Hz : la position du pied
@@ -319,7 +345,9 @@ inline float limitTowardStop(float out, float footAvg, float pitch) {
 // à-coups. Renvoie false si les pieds sont si loin que la butée est
 // imminente (l'appelant coupe alors tout).
 bool recenterStep(float footAvg, float dtRec) {
-  if (fabsf(footAvg) > kFootPanicDeg) return false;
+#if FOOT_TRAVEL_LIMITED
+  if (fabsf(footAvg) > kFootPanicDeg) return false;   // arc : butée imminente
+#endif
 
   // Pied parti vers l'avant ⇒ il faut le ramener en ARRIÈRE : v_cible
   // est de signe opposé à φ (φ_ref = 0).
@@ -374,6 +402,12 @@ void demoStep() {
     return;
   }
 
+  // Roues coupées par une chute (PWM détaché) : en MANUEL, une flèche est
+  // une demande explicite de l'utilisateur → on réarme. Jamais après un
+  // arrêt d'urgence (verrouillé) ni pendant une coupure « boucle figée »
+  // (c'est la reprise en tête de loop() qui réarme).
+  if (Feet::isCut() && !g_state.estop && !s_stallCut) Feet::rearm();
+
   const float fwd  = cmdFwd  * kDemoSpeedDegS / 100.0f;
   const float turn = cmdTurn * kDemoTurnDegS  / 100.0f;
   float vL = fwd + turn;
@@ -397,6 +431,7 @@ bool begin() {
   s_enabled = false;
   s_fallen  = false;
   s_imuLost = false;
+  s_stallCut = false;
   s_lastMicros = micros();
   s_recenterLast = millis();
   s_recenterVel = 0.0f;
@@ -445,6 +480,33 @@ void loop() {
   // Le .ino appelle loop() en continu (200 Hz). L'asservissement ne
   // s'active que si isEnabled(), mais la MESURE IMU a toujours lieu :
   // le PITCH affiché par l'UI doit vivre même robot posé à l'arrêt.
+
+  // ── Signe de vie pour la surveillance (loop(), autre cœur) ───────
+  // Posé au DÉPART du pas : un pas qui bloque (verrou I2C, plantage
+  // partiel) est vu figé BALANCE_STALL_MS plus tard.
+  g_state.balLastStepMs = (uint32_t)millis();
+
+  // ── Arrêt d'urgence : verrouillé jusqu'au RESET ──────────────────
+  // Rien d'autre ne tourne : ni mesure, ni démo. Les roues sont déjà
+  // coupées par emergencyStop() (depuis loop()) ; on le refait ici,
+  // idempotent, au cas où l'appel d'origine aurait échoué.
+  if (g_state.estop) {
+    haltAndCut();
+    publishFeet();
+    return;
+  }
+
+  // ── Reprise après une coupure « boucle figée » ───────────────────
+  // La surveillance a détaché les roues pendant qu'on ne tournait pas.
+  // On repart PROPRE (intégrateurs vidés) avec les roues réarmées : même
+  // philosophie que s_rateLow / s_imuLost (REVIEW_CLAUDE.md M19, reprise
+  // automatique dès que la cause disparaît). Si le robot est tombé
+  // pendant la coupure, le verrou de chute prend le relais ci-dessous.
+  if (s_stallCut) {
+    s_stallCut = false;
+    Feet::rearm();
+    halt();
+  }
 
   // ── Fréquence RÉELLE d'appel (debug UI) ─────────────────────────
   // Compte les appels sur une fenêtre glissante de 1 s. Si l'UI ou la
@@ -569,7 +631,7 @@ void loop() {
   if (fabsf(pitch) > kFallAngleDeg) {
     s_fallen = true;
     s_uprightSince = 0;
-    halt();                          // pieds figés : pas de gigotage au sol
+    haltAndCut();                    // roues COUPÉES : rien ne tourne au sol
     publishFeet();
     return;
   }
@@ -583,23 +645,35 @@ void loop() {
         s_fallen = false;
         s_pid.reset();
         // Le robot est tenu droit à la main : c'est le SEUL moment où
-        // ramener les pieds au neutre est sans danger — et c'est
-        // indispensable, sinon on ré-arme avec des pieds déjà en butée.
+        // réarmer les roues (PWM ré-attaché, à l'arrêt) puis ramener la
+        // course au neutre est sans danger — et c'est indispensable,
+        // sinon on ré-arme avec des pieds déjà en butée (mode arc).
+        Feet::rearm();
         Feet::recenterNow();
         s_recenterLast = millis();
       }
     } else {
       s_uprightSince = 0;
     }
-    if (s_fallen) { halt(); publishFeet(); return; }
+    if (s_fallen) { haltAndCut(); publishFeet(); return; }
   }
 
   // ── Consignes UI (lissées : un cran brutal fait décrocher) ───────
-  int cmdFwd = constrain(g_state.cmdForward, -100, 100);
-  const int cmdTurn = constrain(g_state.cmdTurn, -100, 100);
+  int cmdFwd  = constrain(g_state.cmdForward, -100, 100);
+  int cmdTurn = constrain(g_state.cmdTurn, -100, 100);
   // Obstacle détecté par le module C : on interdit la marche avant,
   // la marche arrière et l'équilibre restent actifs.
   if (g_state.obstacleWarn && cmdFwd > 0) cmdFwd = 0;
+  // ── Évitement (head.cpp → BotState) — ÉQUILIBREUR D'ABORD ─────────
+  // L'évitement ne touche QUE les consignes de déplacement, ici, AVANT le
+  // lissage : tout ce qui suit (cascade, PID, différentiel, roues) est
+  // inchangé. avoidFwdMax plafonne la marche avant (100 = libre, 40 =
+  // ralenti, 0 = stop, négatif = recul doux imposé) ; avoidTurn impose un
+  // pivot vers le côté libre seulement si l'utilisateur ne tourne pas
+  // lui-même. Un recul plus franc demandé par l'UI garde la priorité
+  // (min). Jamais de coupure : une roue coupée, c'est un robot par terre.
+  if (cmdFwd > g_state.avoidFwdMax) cmdFwd = g_state.avoidFwdMax;
+  if (cmdTurn == 0 && g_state.avoidTurn != 0) cmdTurn = constrain(g_state.avoidTurn, -100, 100);
 
   const float maxStep = kCmdSlewPerS * dt;
   s_fwdSmooth  = slew(s_fwdSmooth,  (float)cmdFwd,  maxStep);
@@ -618,11 +692,12 @@ void loop() {
       const float dtRec = constrain((ms - s_recenterLast) * 1e-3f, 0.0f, 1.0f);
       s_recenterLast = ms;
       if (!recenterStep(footAvg, dtRec)) {
-        // Pieds au-delà de kFootPanicDeg malgré le recentrage : la
-        // butée est imminente, la chute avec. On coupe avant.
+        // Pieds au-delà de kFootPanicDeg malgré le recentrage (mode arc
+        // seulement) : la butée est imminente, la chute avec. On coupe
+        // avant, roues détachées comme pour une chute.
         s_fallen = true;
         s_uprightSince = 0;
-        halt();
+        haltAndCut();
         publishFeet();
         return;
       }
@@ -738,5 +813,44 @@ void setOutScale(float k) {
 float getOutScale() { return kOutToFootDegS; }
 
 float pitchRateDps() { return s_lastRateDps; }
+
+// ── Arrêt sûr ───────────────────────────────────────────────────────
+// Surveillance de la boucle, appelée depuis loop() (cœur 1) : si aucun
+// pas n'a DÉMARRÉ depuis BALANCE_STALL_MS, la tâche d'équilibre est
+// bloquée ou morte — sa dernière consigne, elle, tourne toujours sur des
+// servos continus. On détache le PWM d'ici, sur l'autre cœur (la seule
+// écriture servo autorisée hors de la boucle, cf. feet.h). Le drapeau
+// s_stallCut dit à la boucle, si elle repart, de réarmer et de repartir
+// propre. Un gel GLOBAL (écriture flash NVS : cache coupé, les DEUX cœurs
+// s'arrêtent) ne doit pas déclencher : on compare l'écart de la boucle à
+// notre PROPRE écart — si loop() a été figée autant, ce n'est pas la
+// boucle qui est en cause, on attend le tick suivant pour trancher.
+bool watchdog(unsigned long nowMs) {
+  static unsigned long s_prevCheckMs = 0;
+  const unsigned long ownGap = (s_prevCheckMs == 0) ? 0 : (nowMs - s_prevCheckMs);
+  s_prevCheckMs = nowMs;
+  const uint32_t last = g_state.balLastStepMs;
+  if (last == 0) return false;                       // boucle pas encore lancée
+  const unsigned long balGap = nowMs - (unsigned long)last;
+  if (balGap >= BALANCE_STALL_MS && ownGap < BALANCE_STALL_MS / 2 && !s_stallCut) {
+    s_stallCut = true;
+    Feet::cut();
+  }
+  return s_stallCut;
+}
+
+bool stalled() { return s_stallCut; }
+
+// Arrêt d'urgence : appelé depuis loop() (bouton). Le drapeau est posé
+// AVANT la coupure pour que la boucle, où qu'elle en soit, ne réarme pas.
+// Il n'existe aucun chemin qui le remette à false : RESET obligatoire.
+void emergencyStop() {
+  g_state.estop = true;
+  Feet::cut();
+}
+
+bool emergencyStopped() { return g_state.estop; }
+
+bool wheelsCut() { return Feet::isCut(); }
 
 } // namespace Balance
