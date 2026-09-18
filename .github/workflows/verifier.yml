@@ -45,8 +45,18 @@ jobs:
             || { echo "::error::simulateur.html n'est pas à jour — relance l'emballeur et commite le résultat."; exit 1; }
       - name: Aucune ressource externe (le simulateur doit tourner hors ligne)
         run: |
-          if grep -qE '<script src=|<link |@import|fetch\(|XMLHttpRequest|import\(' simulateur.html; then
-            echo "::error::le simulateur embarque une ressource externe : il ne marcherait pas en file://"
+          set -e
+          # 1) Le bundle ne doit RÉFÉRENCER aucun fichier extérieur : c'est ce qui casse
+          #    l'ouverture par double-clic (file://) sur un téléphone.
+          if grep -qE '<script src=|<link |@import' simulateur.html; then
+            echo "::error::le simulateur référence une ressource externe : il ne marcherait pas en file://"
+            exit 1
+          fi
+          # 2) Le code du simulateur ne doit pas non plus aller chercher le réseau.
+          #    On teste les SOURCES et pas le bundle : inside, Three.js contient ses propres
+          #    `fetch(` (FileLoader, non utilisé ici) — ce ne sont pas des appels du projet.
+          if grep -nE 'fetch\(|XMLHttpRequest|import\(' sim/web/*.js; then
+            echo "::error::une source du simulateur fait un appel réseau"
             exit 1
           fi
           echo "Aucune ressource externe."
@@ -66,7 +76,10 @@ jobs:
         run: |
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
-          arduino-cli lib install TFT_eSPI ESP32Servo
+          # Les bibliothèques réellement incluses par le croquis. TouchLib (LilyGo) manquait :
+          # sans elle la compilation échouait sur `fatal error: TouchLib.h`, et la CI aurait
+          # été rouge au premier passage.
+          arduino-cli lib install TFT_eSPI ESP32Servo TouchLib CST816_TouchLib
       - name: Compiler (sans téléverser)
         working-directory: balance-bot
         run: |
