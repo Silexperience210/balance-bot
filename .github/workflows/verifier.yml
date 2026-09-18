@@ -74,12 +74,22 @@ jobs:
           key: arduino-esp32-${{ runner.os }}-v1
       - name: Installer le cœur et les bibliothèques
         run: |
+          set -e
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
-          # Les bibliothèques réellement incluses par le croquis. TouchLib (LilyGo) manquait :
-          # sans elle la compilation échouait sur `fatal error: TouchLib.h`, et la CI aurait
-          # été rouge au premier passage.
-          arduino-cli lib install TFT_eSPI ESP32Servo TouchLib CST816_TouchLib
+          # 1) Bibliothèques du registre Arduino.
+          arduino-cli lib install TFT_eSPI ESP32Servo
+          # 2) TouchLib n'est PAS au registre Arduino (`Library 'TouchLib@latest' not found`).
+          #    LilyGo la distribue dans le dépôt de la carte, et c'est de là qu'elle vient sur
+          #    la machine où le firmware compile : clone ciblé, pas le dépôt entier.
+          mkdir -p ~/Arduino/libraries
+          git clone --depth 1 --filter=blob:none --sparse \
+            https://github.com/Xinyuan-LilyGO/T-Display-S3.git /tmp/lilygo
+          git -C /tmp/lilygo sparse-checkout set lib/TouchLib
+          cp -r /tmp/lilygo/lib/TouchLib ~/Arduino/libraries/TouchLib
+          # 3) La bibliothèque tactile CST816 (également hors registre).
+          git clone --depth 1 https://github.com/mjdonders/CST816_TouchLib.git \
+            ~/Arduino/libraries/CST816_TouchLib
       - name: Compiler (sans téléverser)
         working-directory: balance-bot
         run: |
