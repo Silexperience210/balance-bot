@@ -259,7 +259,12 @@
   var zoneErreur = document.getElementById("erreur-editeur");
   editeur.value = CODE_DEFAUT;
 
-  document.getElementById("btn-appliquer").addEventListener("click", function () {
+  // Dernier code « Appliquer » avec succès (null = modèle nominal) : c'est ce
+  // code que la comparaison A/B rejoue, recompilé à neuf pour chaque instance.
+  var codeApplique = null;
+  var presetApplique = null;          // nom du preset si le code en vient tel quel
+
+  function appliqueCode() {
     try {
       // Le code doit définir `function customEffects(t, state, dt)` ; on la récupère.
       var fn = new Function(editeur.value + "\n;return customEffects;")();
@@ -267,17 +272,275 @@
         throw new Error("Le code doit définir une fonction customEffects(t, state, dt).");
       }
       sim.setCustom(fn);
+      codeApplique = editeur.value;
+      presetApplique = null;
+      PRESETS.forEach(function (p) { if (p.code === codeApplique) presetApplique = p.nom; });
       zoneErreur.textContent = "";
+      return true;
     } catch (e) {
       // Erreur de syntaxe ou d'exécution à la compilation : on affiche, on ne plante pas.
       zoneErreur.textContent = "Erreur : " + e.message;
+      return false;
     }
-  });
+  }
+
+  document.getElementById("btn-appliquer").addEventListener("click", appliqueCode);
   document.getElementById("btn-reinit-code").addEventListener("click", function () {
     editeur.value = CODE_DEFAUT;
     zoneErreur.textContent = "";
+    codeApplique = null;
+    presetApplique = null;
+    document.getElementById("preset-attendu").textContent = "";
     sim.setCustom(null);   // remet le modèle nominal (aucun effet)
   });
+
+  // ── PRESETS d'effets (ROADMAP 2.5) ──────────────────────────────────
+  // Les 6 effets « prêts à coller » du GUIDE-SIMULATEUR.md §7, avec les
+  // résultats MESURÉS dans le simulateur (scénario « θ0=2° propre », jeu de
+  // gains qui tient). Un preset REMPLIT l'éditeur, applique et relance :
+  // il ne verrouille rien — on peut ensuite éditer le code à la main et
+  // ré-appliquer.
+  var PRESETS = [
+    { nom: "Vent constant",
+      attendu: "attendu (mesuré) : TIENT à 10 °/s² — tombe à 3,1 s à 30, à 1,8 s à 60, à 1,1 s à 120",
+      code: "// Vent constant : pousse le corps en continu\n" +
+            "// → mesuré : tient à 10 °/s² ; tombe à 3,1 s à 30, à 1,8 s à 60, à 1,1 s à 120\n" +
+            "function customEffects(t, state, dt) { state.thetaDot += 10 * dt; }\n" },
+    { nom: "Sol glissant",
+      attendu: "attendu (mesuré) : TIENT — l'amortissement aide, il ne nuit pas",
+      code: "// Sol glissant : amortit l'oscillation — il tient mieux, pas moins bien\n" +
+            "function customEffects(t, state, dt) { state.thetaDot *= (1 - 0.5 * dt); }\n" },
+    { nom: "Dérive capteur +0,5°",
+      attendu: "attendu (mesuré) : CHUTE en ~1,2 s — une erreur de mesure tue aussi sûrement qu'une poussée",
+      code: "// Capteur qui dérive de +0,5° : le correcteur se bat contre un fantôme\n" +
+            "// → mesuré : CHUTE en ~1,2 s\n" +
+            "function customEffects(t, state, dt) { state.pitchFilt += 0.5; }\n" },
+    { nom: "Tape à t = 2 s",
+      attendu: "attendu (mesuré) : encaisse 25 °/s sans broncher — tombe à 60 °/s (2,8 s) et 120 °/s (2,3 s)",
+      code: "// Tape à t = 2 s (une impulsion, une seule)\n" +
+            "// → mesuré : encaisse 25 °/s ; tombe à 60 °/s (2,8 s) et 120 °/s (2,3 s)\n" +
+            "function customEffects(t, state, dt) {\n" +
+            "  if (t >= 2 && t < 2 + dt) state.thetaDot += 25;   // °/s\n" +
+            "}\n" },
+    { nom: "Sol en pente",
+      attendu: "attendu (mesuré) : TIENT à 3 °/s — monte la valeur pour trouver le décrochage",
+      code: "// Sol en pente : le robot est incliné en permanence\n" +
+            "// → mesuré : tient à 3 °/s ; monte la valeur pour trouver le décrochage\n" +
+            "function customEffects(t, state, dt) { state.theta += 3 * dt; }\n" },
+    { nom: "Servo paresseux",
+      attendu: "attendu (mesuré) : CHUTE en ~0,5 s — le robot perd son autorité de correction",
+      code: "// Servo paresseux : la roue ne suit la consigne qu'à moitié\n" +
+            "// → mesuré : CHUTE en ~0,5 s\n" +
+            "function customEffects(t, state, dt) { state.phiDot *= 0.5; }\n" }
+  ];
+
+  (function construitPresets() {
+    var conteneur = document.getElementById("presets");
+    var attendu = document.getElementById("preset-attendu");
+    PRESETS.forEach(function (p) {
+      var b = document.createElement("button");
+      b.textContent = p.nom;
+      b.title = p.attendu;
+      b.addEventListener("click", function () {
+        editeur.value = p.code;
+        attendu.textContent = p.attendu + "  (scénario « θ0=2° propre », jeu qui tient)";
+        if (appliqueCode()) {
+          sim.reset(scenarioCourant);
+          us.reset();
+          pousseEvitement();
+          accumulateur = 0;
+          enMarche = true;
+          majBoutons();
+        }
+      });
+      conteneur.appendChild(b);
+    });
+  })();
+
+  // ======================================================================
+  // Comparaison A/B (ROADMAP 2.6) : DEUX instances fraîches du moteur
+  // (BalanceEngine.create(), la physique n'est PAS dupliquée), même graine
+  // (42), même scénario, même état initial, même hook d'effets — seuls les
+  // gains changent. Exécution hors ligne (stepMany), résultats côte à côte
+  // + courbes d'assiette superposées.
+  // ======================================================================
+  var AB_GAINS = [
+    { cle: "kp",    nom: "Kp"   },
+    { cle: "ki",    nom: "Ki"   },
+    { cle: "kd",    nom: "Kd"   },
+    { cle: "kpPhi", nom: "Kpφ"  },
+    { cle: "kv",    nom: "Kv"   },
+    { cle: "kOut",  nom: "k_out" }
+  ];
+  var abChamps = { a: {}, b: {} };     // cote -> {cle: input} + .cascade
+
+  function remplitColonneAB(cote, nomJeu) {
+    var j = JEUX[nomJeu];
+    if (!j) return;
+    AB_GAINS.forEach(function (g) {
+      abChamps[cote][g.cle].value = j.gains[g.cle];
+    });
+    abChamps[cote].cascade.checked = !!BE.defaults.cascade;
+  }
+
+  function construitColonneAB(cote, etiquette, jeuDefaut, classe) {
+    var col = document.getElementById("ab-col-" + cote);
+    var h = document.createElement("h3");
+    h.textContent = etiquette;
+    h.className = classe;
+    col.appendChild(h);
+    var sel = document.createElement("select");
+    sel.innerHTML = Object.keys(JEUX).map(function (k) {
+      return "<option value='" + k + "'>" + JEUX[k].nom + "</option>";
+    }).join("");
+    sel.value = jeuDefaut;
+    sel.addEventListener("change", function () { remplitColonneAB(cote, this.value); });
+    col.appendChild(sel);
+    AB_GAINS.forEach(function (g) {
+      var ligne = document.createElement("div");
+      ligne.className = "reglage";
+      ligne.innerHTML = "<label>" + g.nom + "</label>" +
+        "<input type='number' step='any'>";
+      var input = ligne.querySelector("input");
+      col.appendChild(ligne);
+      abChamps[cote][g.cle] = input;
+    });
+    var ligC = document.createElement("div");
+    ligC.className = "reglage";
+    ligC.innerHTML = "<label>Cascade</label><input type='checkbox'>";
+    abChamps[cote].cascade = ligC.querySelector("input");
+    col.appendChild(ligC);
+    remplitColonneAB(cote, jeuDefaut);
+  }
+
+  function litGainsAB(cote) {
+    var g = { cascade: abChamps[cote].cascade.checked };
+    AB_GAINS.forEach(function (r) {
+      g[r.cle] = parseFloat(abChamps[cote][r.cle].value);
+    });
+    return g;
+  }
+
+  // Recompile le hook appliqué, à neuf pour CHAQUE instance (pas de fermeture
+  // partagée entre A et B).
+  function compileHook() {
+    if (!codeApplique) return null;
+    try {
+      var fn = new Function(codeApplique + "\n;return customEffects;")();
+      return (typeof fn === "function") ? fn : null;
+    } catch (e) { return null; }
+  }
+
+  var abCanvas = document.getElementById("ab-canvas");
+  var abCtx = abCanvas.getContext("2d");
+
+  function dessineAB(traceA, traceB, tmax) {
+    var W = abCanvas.width, H = abCanvas.height;
+    var BORNE = 50;                    // échelle verticale : ±50°
+    function y(theta) { return H / 2 - (theta / BORNE) * (H / 2 - 6); }
+    abCtx.clearRect(0, 0, W, H);
+    // ligne zéro
+    abCtx.strokeStyle = "#3a414c";
+    abCtx.lineWidth = 1;
+    abCtx.beginPath();
+    abCtx.moveTo(0, y(0)); abCtx.lineTo(W, y(0));
+    abCtx.stroke();
+    // seuils de chute ±45°
+    abCtx.strokeStyle = "#e0533d";
+    abCtx.setLineDash([4, 4]);
+    [-45, 45].forEach(function (a) {
+      abCtx.beginPath();
+      abCtx.moveTo(0, y(a)); abCtx.lineTo(W, y(a));
+      abCtx.stroke();
+    });
+    abCtx.setLineDash([]);
+    // courbes d'assiette superposées
+    [[traceA, "#f7931a"], [traceB, "#7fb3f0"]].forEach(function (tc) {
+      var trace = tc[0];
+      if (trace.length < 2) return;
+      abCtx.strokeStyle = tc[1];
+      abCtx.lineWidth = 1.5;
+      abCtx.beginPath();
+      for (var i = 0; i < trace.length; i++) {
+        var x = ((i + 1) * BE.defaults.dt / tmax) * W;
+        if (i === 0) abCtx.moveTo(x, y(trace[i]));
+        else abCtx.lineTo(x, y(trace[i]));
+      }
+      abCtx.stroke();
+    });
+  }
+
+  function lanceAB() {
+    var sc = BE.scenarios[+document.getElementById("ab-scenario").value];
+    // Note d'équité rafraîchie au lancement (l'effet appliqué peut avoir changé).
+    document.getElementById("ab-conditions").textContent =
+      "Comparaison équitable : deux instances fraîches du moteur, même graine (42), " +
+      "même scénario « " + sc.name + " » (θ0 = " + sc.theta0Deg + "°, bruit " + sc.noise +
+      ", tmax = " + sc.tmax + " s), même état initial, même effet secondaire (" +
+      (codeApplique ? (presetApplique ? "preset « " + presetApplique + " »" : "code de l'éditeur") : "aucun") +
+      ") — seuls les gains changent.";
+    var resultats = ["a", "b"].map(function (cote) {
+      var g = litGainsAB(cote);
+      var s = BE.create({ seed: 42, kp: g.kp, ki: g.ki, kd: g.kd,
+                          kpPhi: g.kpPhi, kv: g.kv, kOut: g.kOut,
+                          cascade: g.cascade, noise: sc.noise });
+      var hook = compileHook();
+      if (hook) s.setCustom(hook);
+      s.reset(sc);
+      var trace = [];
+      while (s.state.verdict === null) { s.step(); trace.push(s.state.theta); }
+      return { verdict: s.state.verdict, t: s.state.t, theta: s.state.theta, trace: trace };
+    });
+
+    resultats.forEach(function (r, i) {
+      var c = i === 0 ? "a" : "b";
+      var tdV = document.getElementById("ab-" + c + "-verdict");
+      var tdT = document.getElementById("ab-" + c + "-temps");
+      if (r.verdict === "ok") {
+        tdV.textContent = "TIENT (" + r.t.toFixed(2) + " s)";
+        tdV.className = "vok";
+        tdT.textContent = "—";
+      } else {
+        tdV.textContent = r.verdict + " à " + r.t.toFixed(3) + " s";
+        tdV.className = r.verdict === "chute θ" ? "vchute" : "vpanique";
+        tdT.textContent = r.t.toFixed(3) + " s";
+      }
+      document.getElementById("ab-" + c + "-theta").textContent =
+        (r.theta >= 0 ? "+" : "") + r.theta.toFixed(2) + " °";
+    });
+
+    var resume = document.getElementById("ab-resume");
+    var a = resultats[0], b = resultats[1];
+    if (a.verdict === "ok" && b.verdict !== "ok") {
+      resume.textContent = "A TIENT, B tombe → A meilleur sur ce scénario.";
+      resume.className = "vok";
+    } else if (b.verdict === "ok" && a.verdict !== "ok") {
+      resume.textContent = "B TIENT, A tombe → B meilleur sur ce scénario.";
+      resume.className = "vok";
+    } else if (a.verdict === "ok" && b.verdict === "ok") {
+      resume.textContent = "A et B tiennent — la courbe la plus proche de 0° est la plus raide " +
+        "(θ fin : A " + a.theta.toFixed(2) + "°, B " + b.theta.toFixed(2) + "°).";
+      resume.className = "";
+    } else {
+      var plusTard = a.t === b.t ? "égalité" : (a.t > b.t ? "A" : "B") + " tient plus longtemps";
+      resume.textContent = "A et B tombent — " + plusTard +
+        " (A " + a.t.toFixed(3) + " s, B " + b.t.toFixed(3) + " s).";
+      resume.className = "";
+    }
+
+    dessineAB(a.trace, b.trace, sc.tmax);
+  }
+
+  function construitAB() {
+    construitColonneAB("a", "A", "tient", "ab-a");
+    construitColonneAB("b", "B", "embarques", "ab-b");
+    var sel = document.getElementById("ab-scenario");
+    sel.innerHTML = BE.scenarios.map(function (sc, i) {
+      return "<option value='" + i + "'>" + sc.name + "</option>";
+    }).join("");
+    document.getElementById("btn-ab-run").addEventListener("click", lanceAB);
+  }
+  construitAB();
 
   // ======================================================================
   // Panneau « Capteur ultrason » : curseur d'obstacle + case « débranché »

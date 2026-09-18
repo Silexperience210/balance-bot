@@ -198,6 +198,25 @@ function customEffects(t, state, dt) { state.theta += 3 * dt; }
 function customEffects(t, state, dt) { state.phiDot *= 0.5; }
 ```
 
+### Les 6 presets (boutons)
+
+Au-dessus de l'éditeur, six boutons reprennent **exactement** les exemples ci-dessus, avec
+le résultat **mesuré** affiché à côté (sur `θ0=2° propre`, jeu qui tient) :
+
+| Preset | Attendu (mesuré) |
+|---|---|
+| **Vent constant** (`thetaDot += 10·dt`) | tient à 10 °/s² ; tombe à 3,1 s à 30 |
+| **Sol glissant** (`thetaDot *= 1 − 0,5·dt`) | tient — l'amortissement aide |
+| **Dérive capteur +0,5°** (`pitchFilt += 0.5`) | **chute en ~1,2 s** |
+| **Tape à t = 2 s** (`thetaDot += 25`) | encaisse 25 °/s ; tombe à 60 |
+| **Sol en pente** (`theta += 3·dt`) | tient à 3 °/s |
+| **Servo paresseux** (`phiDot *= 0.5`) | **chute en ~0,5 s** |
+
+Un clic **remplit l'éditeur, applique l'effet et relance** le scénario courant — tu vois le
+résultat immédiatement, à comparer avec l'attendu affiché. Le preset ne **verrouille** rien :
+le code reste dans l'éditeur, tu peux le modifier à la main (monter le vent à 30, changer
+l'instant de la tape…) puis recliquer **`Appliquer`**.
+
 ### Les garde-fous
 
 - Le cœur physique **n'est pas modifiable** : le hook est la **seule porte d'injection**.
@@ -206,7 +225,28 @@ function customEffects(t, state, dt) { state.phiDot *= 0.5; }
 - **`Réinitialiser le code`** enlève ton effet et remet le modèle nominal.
 - Pour comparer proprement : lance un scénario **sans** effet, note le verdict, applique
   l'effet, relance le **même scénario**. C'est comme ça qu'on découvre qu'un réglage est
-  fragile.
+  fragile. Pour comparer deux **jeux de gains**, utilise directement la comparaison A/B
+  (§7 bis).
+
+## 7 bis. Comparer deux jeux de gains (A/B)
+
+Le panneau **« COMPARAISON A/B (DEUX JEUX DE GAINS) »**, sous l'éditeur, fait tourner **deux
+instances fraîches du moteur en parallèle** — la physique n'est pas dupliquée, elle est
+instanciée deux fois (`BalanceEngine.create()`).
+
+- **A** et **B** ont chacun leurs gains (`Kp`, `Ki`, `Kd`, `Kpφ`, `Kv`, `k_out`, cascade),
+  pré-remplis par un sélecteur (A = jeu qui tient, B = gains embarqués) mais **modifiables
+  à la main** champ par champ.
+- **Scénario** : le même pour les deux, choisi dans la liste.
+- **`Lancer A/B`** rejoue le scénario hors ligne (quelques millisecondes) et affiche côte à
+  côte : verdict (**tient** / chute), **temps de chute**, **θ final**, puis un résumé
+  (« A TIENT, B tombe → A meilleur »), et les **courbes d'assiette θ(t) superposées**
+  (A en orange, B en bleu ; les pointillés rouges marquent le seuil de chute ±45°).
+
+**Comparaison équitable, garantie et affichée** : même graine (42), même scénario, même état
+initial, même effet secondaire éventuel (le dernier code « Appliquer » de l'éditeur est
+rejoué, recompilé à neuf, sur les **deux** instances) — **seuls les gains changent**. La
+note sous le bouton rappelle ces conditions à chaque lancement.
 
 ## 8. Ce que le simulateur ne fait pas
 

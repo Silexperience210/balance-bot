@@ -66,13 +66,13 @@
   #boutons-marche button { margin-right: 6px; }
   #vitesses button { margin-right: 6px; }
   #scenarios button { margin: 2px 4px 2px 0; }
-  #sel-visage, #sel-anim {
+  #sel-visage, #sel-anim, #ab-scenario {
     width: 100%;
     background: #262b33; color: var(--texte);
     border: 1px solid var(--bord); border-radius: 5px;
     padding: 6px 8px; font-size: 13px;
   }
-  #sel-visage:hover, #sel-anim:hover { border-color: var(--orange); }
+  #sel-visage:hover, #sel-anim:hover, #ab-scenario:hover { border-color: var(--orange); }
   #sel-anim { margin-bottom: 6px; }
   /* ---- Sliders ---- */
   .reglage { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
@@ -105,6 +105,43 @@
     color: var(--rouge); font: 12px ui-monospace, monospace;
     white-space: pre-wrap; margin-top: 6px; min-height: 1em;
   }
+  /* ---- Presets d'effets ---- */
+  #presets button { margin: 2px 4px 2px 0; font-size: 12px; padding: 4px 8px; }
+  #preset-attendu { font-size: 11px; color: var(--jaune); margin: 2px 0 6px; min-height: 1em; }
+  /* ---- Comparaison A/B ---- */
+  #ab-grille { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+  .ab-col { flex: 1 1 230px; border: 1px solid var(--bord); border-radius: 5px; padding: 6px 8px; }
+  .ab-col h3 { font-size: 12px; margin: 0 0 4px; }
+  .ab-col select {
+    width: 100%; background: #262b33; color: var(--texte);
+    border: 1px solid var(--bord); border-radius: 5px;
+    padding: 4px 6px; font-size: 12px; margin-bottom: 4px;
+  }
+  .ab-col .reglage { margin: 2px 0; }
+  .ab-col .reglage label { flex: 0 0 46px; font-size: 12px; }
+  .ab-col input[type=number] {
+    flex: 1; min-width: 0; background: #101318; color: var(--texte);
+    border: 1px solid var(--bord); border-radius: 4px;
+    padding: 2px 4px; font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .ab-col input[type=checkbox] { accent-color: var(--orange); }
+  .ab-a { color: var(--orange); }
+  .ab-b { color: #7fb3f0; }
+  #ab-resultats { width: 100%; border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  #ab-resultats th, #ab-resultats td {
+    text-align: left; padding: 2px 6px; border-bottom: 1px solid var(--bord); font-size: 13px;
+  }
+  #ab-resultats th { color: var(--texte-dim); font-weight: 600; }
+  #ab-canvas {
+    width: 100%; height: 170px; margin-top: 8px;
+    background: #101318; border: 1px solid var(--bord); border-radius: 5px;
+  }
+  #ab-conditions, #ab-resume, #ab-legende { font-size: 12px; margin-top: 6px; }
+  #ab-conditions, #ab-legende { color: var(--texte-dim); }
+  #ab-resume { font-weight: 600; }
+  .vok { color: var(--vert); font-weight: 600; }
+  .vchute { color: var(--rouge); font-weight: 600; }
+  .vpanique { color: var(--jaune); font-weight: 600; }
   #msg-moteur {
     color: var(--rouge); font-weight: 600; padding: 8px;
     display: none;
@@ -128,12 +165,42 @@
 
       <div class="panneau">
         <h2>Effets secondaires (hook moteur)</h2>
+        <div id="presets"><!-- les 6 effets mesurés du guide, remplis par ui.js --></div>
+        <div id="preset-attendu"></div>
         <textarea id="editeur" spellcheck="false"></textarea>
         <div style="margin-top:6px">
           <button id="btn-appliquer">Appliquer</button>
           <button id="btn-reinit-code">Réinitialiser le code</button>
         </div>
         <div id="erreur-editeur"></div>
+      </div>
+
+      <div class="panneau">
+        <h2>Comparaison A/B (deux jeux de gains)</h2>
+        <div id="ab-grille">
+          <div class="ab-col" id="ab-col-a"></div>
+          <div class="ab-col" id="ab-col-b"></div>
+        </div>
+        <div class="reglage">
+          <label>Scénario</label>
+          <select id="ab-scenario"></select>
+        </div>
+        <div style="margin-top:4px">
+          <button id="btn-ab-run">Lancer A/B</button>
+        </div>
+        <div id="ab-conditions">Deux instances fraîches du moteur, même graine (42),
+          même scénario, même état initial, même effet secondaire éventuel :
+          seuls les gains changent — la comparaison est équitable.</div>
+        <table id="ab-resultats">
+          <tr><th></th><th class="ab-a">A</th><th class="ab-b">B</th></tr>
+          <tr><td>Verdict</td>         <td id="ab-a-verdict">—</td> <td id="ab-b-verdict">—</td></tr>
+          <tr><td>Temps de chute</td>  <td id="ab-a-temps">—</td>   <td id="ab-b-temps">—</td></tr>
+          <tr><td>θ final</td>         <td id="ab-a-theta">—</td>   <td id="ab-b-theta">—</td></tr>
+        </table>
+        <div id="ab-resume"></div>
+        <canvas id="ab-canvas" width="720" height="180"></canvas>
+        <div id="ab-legende"><span class="ab-a">— A</span> · <span class="ab-b">— B</span> ·
+          assiette θ (°) en fonction du temps ; les pointillés rouges marquent la chute (±45°).</div>
       </div>
     </div>
 
