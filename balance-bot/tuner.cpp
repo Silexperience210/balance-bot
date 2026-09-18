@@ -40,12 +40,12 @@ constexpr unsigned long kActiveWindowMs = 2000;
 constexpr unsigned long kSlowRequestUs = 5000;
 
 WebServer      s_server(80);
-bool           s_up          = false;   // AP + serveur démarrés
+volatile bool  s_up          = false;   // AP + serveur démarrés (état RÉEL)
+volatile bool  s_wantUp      = false;   // état DEMANDÉ (toggle), appliqué par serverTask
 unsigned long  s_lastReqMs   = 0;
 bool           s_stationSeen = false;   // ≥1 station associée (cache 10 Hz)
 unsigned long  s_lastStationMs = 0;
 TaskHandle_t   s_task        = nullptr;
-volatile bool  s_announce    = false;   // toggle() → serverTask() trace l'état
 
 // ── Démarrage / arrêt de la radio (partagés par begin() et toggle()) ──
 bool startRadio() {
@@ -69,8 +69,8 @@ void stopRadio() {
 
 // Trace série de l'état de la radio. JAMAIS depuis loop() : une écriture
 // USB-CDC bloque quand l'hôte ne draine pas le port (STALL_ANALYSIS.md
-// §6). Appelée depuis setup() via begin(), et depuis serverTask() sur
-// demande de toggle() — REVIEW_CLAUDE M14.
+// §6). Appelée depuis setup() via begin(), et depuis serverTask() après
+// chaque transition radio demandée par toggle() — REVIEW_CLAUDE M14.
 void announce() {
   if (s_up) {
     Serial.print("BANC WEB  : OUVERT — SSID « ");
@@ -93,9 +93,19 @@ void announce() {
 // pas l'équilibre. En mono-cœur elle reste sur le cœur 0 comme avant.
 void serverTask(void*) {
   for (;;) {
-    if (s_announce) {                    // appui long BOOT : la trace s'écrit ICI
-      s_announce = false;
-      announce();
+    // Les transitions radio sont appliquées ICI, sur le MÊME fil que
+    // handleClient() : toggle() ne pose qu'une demande (s_wantUp), donc
+    // WiFi.mode()/softAPdisconnect()/server.begin() ne peuvent plus
+    // jamais s'exécuter au milieu d'une requête en cours (course
+    // préexistante toggle() ↔ handleClient(), fermée par ce déport —
+    // zéro mutex, zéro attente : rien ne change pour l'équilibre).
+    if (s_wantUp != s_up) {
+      if (s_wantUp) {
+        if (!startRadio()) s_wantUp = false;   // AP refusé : on n'insiste pas
+      } else {
+        stopRadio();
+      }
+      announce();                    // la trace s'écrit ICI (jamais loop())
     }
     if (s_up) {
       const unsigned long now = millis();
@@ -327,11 +337,19 @@ bool begin() {
   s_server.on("/api/face",   HTTP_GET,  handleFace);
   s_server.onNotFound([]() { s_server.send(404, "text/plain", "404"); });
 
+  // La radio démarre ICI, depuis setup(), AVANT que la tâche serveur
+  // n'existe : après sa création, toute transition radio passe par
+  // s_wantUp et est appliquée par la tâche elle-même (cf. serverTask) —
+  // jamais de WiFi.mode() en concurrence avec un handleClient().
+  s_wantUp = true;
+  const bool radioOk = startRadio();
+  if (!radioOk) s_wantUp = false;
+
   // Le serveur tourne sur SA tâche (TUNER_TASK_CORE). Créée une fois pour
   // toutes ; elle ne fait rien tant que la radio est fermée.
   xTaskCreatePinnedToCore(serverTask, "tuner", 8192, nullptr, 1, &s_task, TUNER_TASK_CORE);
 
-  if (!startRadio()) {
+  if (!radioOk) {
     Serial.println("BANC WEB  : ÉCHEC softAP — tuner désactivé (appui long BOOT pour réessayer)");
     return false;
   }
@@ -344,14 +362,15 @@ bool begin() {
 // donc plus à l'appeler. La cadence réelle est fixée par la tâche.
 void loop() {}
 
-// Appui long sur BOOT (.ino) : ouvre/ferme le banc web à la demande.
-// Le réseau est OUVERT : le fermer quand on ne règle pas supprime la
-// surface d'attaque et la consommation radio.
+// Appui long sur KEY (.ino) : DEMANDE l'ouverture/la fermeture du banc
+// web. La transition réelle (WiFi.mode, server.begin, softAPdisconnect)
+// est appliquée par serverTask sous quelques ms, sur le même fil que
+// handleClient() — ainsi les appels WiFi ne croisent jamais une requête
+// en cours. Le réseau est OUVERT : le fermer quand on ne règle pas
+// supprime la surface d'attaque et la consommation radio.
 bool toggle() {
-  if (s_up) stopRadio();
-  else      startRadio();
-  s_announce = true;                     // trace écrite par serverTask (cœur 0)
-  return s_up;
+  s_wantUp = !s_wantUp;
+  return s_wantUp;                       // état demandé (isUp() = état réel)
 }
 
 bool isUp() { return s_up; }

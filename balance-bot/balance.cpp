@@ -202,12 +202,17 @@ constexpr unsigned long kRateGraceMs = 3000;
 
 // ── Mode démo (équilibre OFF) ──────────────────────────────────────
 // Sert à VALIDER LA MÉCANIQUE sans asservissement : les flèches de l'UI
-// font rouler les pieds lentement dans une plage volontairement étroite
-// (le robot est tenu à la main ou couché). Aucune sécurité d'équilibre
-// n'est active ici, d'où les valeurs timides.
+// font rouler les pieds lentement (le robot est tenu à la main ou
+// couché). Aucune sécurité d'équilibre n'est active ici, d'où les
+// valeurs timides.
 constexpr float kDemoSpeedDegS = 20.0f;   // à plein cmdForward
 constexpr float kDemoTurnDegS  = 12.0f;   // différentiel, à plein cmdTurn
+#if FOOT_TRAVEL_LIMITED
+// Butée d'arc du mode démo — n'existe qu'en mode POSITION : une roue n'a
+// pas de butée, et valider la mécanique en MANUEL suppose de pouvoir la
+// faire tourner librement (cf. demoStep).
 constexpr float kDemoLimitDeg  = 15.0f;   // débattement autorisé en démo
+#endif
 
 // ═══════════════════════════════════════════════════════════════════
 
@@ -390,8 +395,10 @@ inline void updateFootVel(float cmdDegS, float dt) {
 }
 
 // Mode démo (équilibre OFF) : les flèches de l'UI font rouler les pieds
-// lentement, dans ±kDemoLimitDeg. Sert à valider la mécanique — aucun
-// asservissement, la priorité reste l'équilibre statique.
+// lentement. Sert à valider la mécanique — aucun asservissement, la
+// priorité reste l'équilibre statique. En mode roues la rotation est
+// LIBRE (pas de butée : φ s'intègre sans borne, comme dans la boucle
+// d'équilibre) ; en mode arc, ±kDemoLimitDeg protège la mécanique.
 void demoStep() {
   const int cmdFwd  = constrain(g_state.cmdForward, -100, 100);
   const int cmdTurn = constrain(g_state.cmdTurn, -100, 100);
@@ -414,10 +421,15 @@ void demoStep() {
   float vR = fwd - turn;
 
   // Butée de démo : on annule la composante qui pousserait au-delà.
+  // Mode roues : rien — une roue tourne sans fin, φ n'a plus de sens
+  // comme butée (même traitement que les autres garde-fous d'arc :
+  // butée dure de feet.cpp, soft clamp et « panic » ci-dessus).
+#if FOOT_TRAVEL_LIMITED
   if (Feet::angleL() >  kDemoLimitDeg && vL > 0.0f) vL = 0.0f;
   if (Feet::angleL() < -kDemoLimitDeg && vL < 0.0f) vL = 0.0f;
   if (Feet::angleR() >  kDemoLimitDeg && vR > 0.0f) vR = 0.0f;
   if (Feet::angleR() < -kDemoLimitDeg && vR < 0.0f) vR = 0.0f;
+#endif
 
   Feet::driveFootSpeed((int)lroundf(vL), (int)lroundf(vR));
   publishFeet();
@@ -830,8 +842,30 @@ bool watchdog(unsigned long nowMs) {
   const unsigned long ownGap = (s_prevCheckMs == 0) ? 0 : (nowMs - s_prevCheckMs);
   s_prevCheckMs = nowMs;
   const uint32_t last = g_state.balLastStepMs;
-  if (last == 0) return false;                       // boucle pas encore lancée
+  if (last == 0) {
+    // Tâche d'équilibre JAMAIS lancée (échec de xTaskCreatePinnedToCore
+    // dans setup()) : balLastStepMs reste 0 pour toujours, et le test
+    // principal ci-dessous ne couvrirait jamais ce cas. La tâche, créée
+    // en fin de setup() à priorité BALANCE_TASK_PRIO, pose son signe de
+    // vie dans les 5 ms qui suivent — un 0 persistant passé un budget de
+    // démarrage ne peut donc signifier que « pas de boucle du tout ».
+    // Le seul état sûr d'un robot sans boucle est roues DÉTACHÉES (le
+    // neutre 1500 µs d'un servo continu mal trimmé peut ramper).
+    if (nowMs >= BALANCE_STALL_MS && !s_stallCut) {
+      s_stallCut = true;
+      Feet::cut();
+    }
+    return s_stallCut;
+  }
   const unsigned long balGap = nowMs - (unsigned long)last;
+  // CAS NON COUVERT, assumé et documenté : si loop() elle-même itère
+  // durablement en plus de BALANCE_STALL_MS/2 (ex. tempête I²C côté
+  // tactile figeant les DEUX cœurs en continu), la garde ownGap ne
+  // laisse jamais passer la coupure — sans troisième base de temps on
+  // ne peut pas distinguer « boucle morte » de « tout est figé », et la
+  // garde existe pour les gels flash NVS (faux positifs). Filets
+  // restants dans ce scénario : verrou de chute (|pitch| > 45°, si la
+  // tâche tourne encore), estop BOOT, RESET physique.
   if (balGap >= BALANCE_STALL_MS && ownGap < BALANCE_STALL_MS / 2 && !s_stallCut) {
     s_stallCut = true;
     Feet::cut();

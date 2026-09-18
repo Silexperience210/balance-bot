@@ -15,8 +15,10 @@ namespace Tuner {
 // la télémétrie / l'UI ; le serveur ne dépend plus de son appelant.
 unsigned long lastRequestMs();
 
-// Ouvre/ferme la radio du banc web (appui long BOOT). Renvoie le nouvel
-// état : true = AP ouvert. isUp() le lit sans rien changer.
+// Demande l'ouverture/la fermeture de la radio du banc web (appui long
+// KEY). La transition est appliquée par la tâche serveur quelques ms plus
+// tard — jamais de WiFi.mode() en concurrence avec un handleClient().
+// Renvoie l'état DEMANDÉ (true = AP ouvert) ; isUp() lit l'état réel.
 bool toggle();
 bool isUp();
 
