@@ -39,12 +39,21 @@ constexpr unsigned long kActiveWindowMs = 2000;
 // on le signale sur le port série (diagnostic, pas une erreur fatale).
 constexpr unsigned long kSlowRequestUs = 5000;
 
+// Conduite web (page /drive) : si plus aucune consigne n'arrive pendant ce
+// délai alors que le web pilotait, on retourne au neutre. Un navigateur mis
+// en veille par le téléphone cesse d'émettre sans prévenir — un robot qui
+// garde sa dernière consigne finit dans le mur. La page émet toutes les
+// 150 ms pendant que le doigt est posé : 500 ms couvre 3 pertes de trame.
+constexpr unsigned long kDriveTimeoutMs = 500;
+
 WebServer      s_server(80);
 volatile bool  s_up          = false;   // AP + serveur démarrés (état RÉEL)
 volatile bool  s_wantUp      = false;   // état DEMANDÉ (toggle), appliqué par serverTask
 unsigned long  s_lastReqMs   = 0;
 bool           s_stationSeen = false;   // ≥1 station associée (cache 10 Hz)
 unsigned long  s_lastStationMs = 0;
+unsigned long  s_driveLastMs = 0;       // dernière consigne /api/cmd reçue
+bool           s_webDriving  = false;   // la consigne courante vient du web
 TaskHandle_t   s_task        = nullptr;
 
 // ── Démarrage / arrêt de la radio (partagés par begin() et toggle()) ──
@@ -113,6 +122,17 @@ void serverTask(void*) {
         s_lastStationMs = now;
         s_stationSeen = (WiFi.softAPgetStationNum() > 0);
       }
+      // Watchdog conduite web : plus de consigne depuis kDriveTimeoutMs
+      // alors que le web pilotait → neutre. Ne touche QUE les consignes
+      // posées par le web (s_webDriving) : jamais celles des flèches de
+      // l'écran. Même chemin que tout pilotage : g_state.cmdForward/cmdTurn,
+      // le lissage et les bornes de balance.cpp restent appliqués.
+      if (s_webDriving && (now - s_driveLastMs > kDriveTimeoutMs)) {
+        s_webDriving = false;
+        g_state.cmdForward = 0;
+        g_state.cmdTurn = 0;
+        Serial.println("TUNER : conduite web muette → neutre");
+      }
       const unsigned long t0 = micros();
       s_server.handleClient();
       const unsigned long dt = micros() - t0;
@@ -147,6 +167,7 @@ button.on{background:#c0392b}
 #s{text-align:center;font-size:12px;color:#667;margin-top:8px}
 </style></head><body>
 <h1>BALANCEBOT &middot; R&Eacute;GLAGE</h1>
+<div style="margin-bottom:6px"><a href="/drive" style="color:#ff9d2e;font-size:13px">CONDUIRE &rarr;</a></div>
 <div class="c"><div id="p">--</div><div class="t">
 <div>vitesse<b id="r">--</b></div><div>pied G<b id="fl">--</b></div>
 <div>pied D<b id="fr">--</b></div><div>boucle<b id="hz">--</b></div></div></div>
@@ -190,6 +211,80 @@ function tick(){fetch('/api/state').then(function(r){return r.json()}).then(func
 setInterval(tick,150);tick();
 </script></body></html>)HTML";
 
+// ── Page de CONDUITE (/drive) ──────────────────────────────────────
+// Outil de conduite, pas un tableau de bord : un joystick, un STOP,
+// l'assiette / l'état / la batterie. Rien d'autre.
+//
+// SÉCURITÉ — trois filets indépendants, tous aboutissant au MÊME chemin
+// de commande que les flèches de l'écran (g_state.cmdForward/cmdTurn,
+// bornés ici ±100 puis lissés par balance.cpp, kCmdSlewPerS) :
+//   1. doigt levé (pointerup/cancel) → envoi immédiat de 0,0 ;
+//   2. page cachée/fermée (pagehide, visibilitychange) → sendBeacon 0,0 ;
+//   3. silence > kDriveTimeoutMs côté carte → neutre (serverTask).
+// Le joystick émet toutes les 150 ms tant que le doigt est posé : la carte
+// sait donc distinguer « on pilote » de « le téléphone s'est endormi ».
+const char kDrivePage[] PROGMEM = R"HTML(<!DOCTYPE html><html lang="fr"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>BalanceBot — conduite</title><style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#0d0f12;color:#e8e8e8;font:15px system-ui,sans-serif;overscroll-behavior:none;user-select:none;-webkit-user-select:none}
+header{display:flex;align-items:baseline;gap:14px;padding:6px 10px}
+header a{color:#ff9d2e;font-size:13px;text-decoration:none}
+#p{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+#p.up{color:#3ddc6b}
+#st{font-size:13px;color:#8b94a0}
+#bat{margin-left:auto;font-size:15px;font-variant-numeric:tabular-nums}
+main{display:flex;gap:10px;padding:6px 10px;height:calc(100% - 46px)}
+#pad{position:relative;flex:1;min-width:0;border-radius:14px;background:#181b20;touch-action:none;
+ display:flex;align-items:center;justify-content:center}
+#ring{position:absolute;width:150px;height:150px;border:2px solid #2a2f38;border-radius:50%}
+#knob{width:64px;height:64px;border-radius:50%;background:#ff9d2e;opacity:.85;pointer-events:none}
+#stop{flex:0 0 34%;border:0;border-radius:14px;background:#c0392b;color:#fff;font-size:26px;font-weight:800}
+#v{text-align:center;font-size:11px;color:#667;padding-bottom:4px;font-variant-numeric:tabular-nums}
+</style></head><body>
+<header><a href="/">&larr; R&Eacute;GLAGE</a><span id="p">--</span><span id="st">--</span><span id="bat">--</span></header>
+<main><div id="pad"><div id="ring"></div><div id="knob"></div></div><button id="stop">STOP</button></main>
+<div id="v">avant 0 &middot; virage 0</div>
+<script>
+var E=function(i){return document.getElementById(i)};
+var FORM={method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'}};
+function post(u,b){var o={};for(var k in FORM)o[k]=FORM[k];o.body=b;return fetch(u,o)}
+var pad=E('pad'),knob=E('knob'),pid=null,fwd=0,turn=0,R=70;
+function send(){post('/api/cmd','fwd='+fwd+'&turn='+turn).catch(function(){})}
+function setCmd(f,t){fwd=f;turn=t;E('v').textContent='avant '+f+' · virage '+t}
+function upd(e){var r=pad.getBoundingClientRect();
+ var dx=e.clientX-(r.left+r.width/2),dy=e.clientY-(r.top+r.height/2);
+ var d=Math.sqrt(dx*dx+dy*dy);if(d>R){dx*=R/d;dy*=R/d}
+ knob.style.transform='translate('+dx+'px,'+dy+'px)';
+ var f=Math.round(-dy/R*100),t=Math.round(dx/R*100);
+ if(Math.abs(f)<8)f=0;if(Math.abs(t)<8)t=0;          // zone morte
+ if(f!==fwd||t!==turn){setCmd(f,t);send()}}
+pad.addEventListener('pointerdown',function(e){pid=e.pointerId;pad.setPointerCapture(pid);upd(e);e.preventDefault()});
+pad.addEventListener('pointermove',function(e){if(e.pointerId===pid)upd(e)});
+function rel(e){if(e.pointerId!==pid)return;pid=null;knob.style.transform='translate(0,0)';
+ if(fwd||turn){setCmd(0,0);send()}}
+pad.addEventListener('pointerup',rel);pad.addEventListener('pointercancel',rel);
+// battement : tant que le doigt est posé, la carte reçoit une consigne
+// fraîche toutes les 150 ms ; le silence déclenche son watchdog (500 ms).
+setInterval(function(){if(pid!==null)send()},150);
+E('stop').addEventListener('click',function(){pid=null;knob.style.transform='translate(0,0)';setCmd(0,0);send()});
+// perte de contact : le navigateur part en veille sans pointerup — on tente
+// un dernier neutre (le watchdog de la carte couvre les cas où il ne part pas).
+function neutre(){try{navigator.sendBeacon('/api/cmd',
+ new Blob(['fwd=0&turn=0'],{type:'application/x-www-form-urlencoded'}))}catch(e){}
+ fetch('/api/cmd?fwd=0&turn=0',{keepalive:true}).catch(function(){})}
+window.addEventListener('pagehide',neutre);
+document.addEventListener('visibilitychange',function(){if(document.hidden)neutre()});
+function tick(){fetch('/api/state').then(function(r){return r.json()}).then(function(d){
+ E('p').textContent=d.pitch.toFixed(1)+'°';E('p').className=d.up?'up':'';
+ E('st').textContent=d.up?'BALANCING':(d.balancing?'ARMÉ':'MANUEL');
+ var bv=d.batv;
+ E('bat').textContent=bv<0?'USB':bv.toFixed(2)+' V';
+ E('bat').style.color=(d.batlow&&bv>=0)?'#e74c3c':'#e8e8e8';
+}).catch(function(){})}
+setInterval(tick,500);tick();
+</script></body></html>)HTML";
+
 // ── Routes ─────────────────────────────────────────────────────────
 
 void touchReq() { s_lastReqMs = millis(); }
@@ -197,6 +292,27 @@ void touchReq() { s_lastReqMs = millis(); }
 void handleRoot() {
   touchReq();
   s_server.send_P(200, "text/html", kPage);
+}
+
+void handleDrive() {
+  touchReq();
+  s_server.send_P(200, "text/html", kDrivePage);
+}
+
+// Consigne de conduite (page /drive). MÊME chemin que les flèches de
+// l'écran : on écrit g_state.cmdForward/cmdTurn, bornés ±100 ici puis
+// contraints + lissés (kCmdSlewPerS) par balance.cpp — aucun second chemin
+// de commande. Accepte GET (sendBeacon/keepalive de secours) et POST.
+// Un argument absent ou invalide vaut 0 = neutre, jamais l'inverse.
+void handleCmd() {
+  touchReq();
+  const int fwd  = constrain(s_server.hasArg("fwd")  ? s_server.arg("fwd").toInt()  : 0, -100, 100);
+  const int turn = constrain(s_server.hasArg("turn") ? s_server.arg("turn").toInt() : 0, -100, 100);
+  g_state.cmdForward = fwd;
+  g_state.cmdTurn    = turn;
+  s_driveLastMs = millis();
+  s_webDriving  = (fwd != 0 || turn != 0);   // watchdog : seul le web annule ce que le web a posé
+  s_server.send(200, "text/plain", "ok");
 }
 
 // Télémétrie compacte. « balancing » = ARMÉ (miroir du bouton EQUIL. de
@@ -209,15 +325,17 @@ void handleState() {
   Balance::getRecenterGains(kpPhi, kv);
   const float kOut = Balance::getOutScale();
   // 512 o : les 19 champs de cadence ajoutés cette nuit font ~354 o en usage
-  // réel et jusqu'à ~410 o compteurs saturés — l'ancien tampon de 384 o
-  // laissait 30 o de marge et aurait produit un JSON tronqué (page « hors
-  // ligne… » à vie) — FINAL_REVIEW constat 1. On teste le retour.
+  // réel et jusqu'à ~410 o compteurs saturés, + ~24 o pour batv/batlow
+  // (page /drive) — l'ancien tampon de 384 o laissait 30 o de marge et
+  // aurait produit un JSON tronqué (page « hors ligne… » à vie) —
+  // FINAL_REVIEW constat 1. On teste le retour.
   char buf[512];
   const int len = snprintf(buf, sizeof(buf),
            "{\"pitch\":%.1f,\"rate\":%.0f,\"footL\":%d,\"footR\":%d,"
            "\"hz\":%.0f,\"kp\":%.1f,\"ki\":%.0f,\"kd\":%.2f,"
            "\"kpphi\":%.1f,\"kv\":%.1f,\"kout\":%.1f,"
            "\"balancing\":%d,\"up\":%d,\"ui\":%u,\"s\":%lu,"
+           "\"batv\":%.2f,\"batlow\":%d,"
            "\"gap\":%u,\"gph\":%u,\"loop\":%u,\"bal\":%u,\"head\":%u,"
            "\"bat\":%u,\"stalls\":%u,\"worst\":%u,"
            "\"big\":%u,\"lgap\":%u,\"lgph\":%u,\"lglp\":%u,"
@@ -228,6 +346,7 @@ void handleState() {
            kp, ki, kd, kpPhi, kv, kOut,
            Balance::isEnabled() ? 1 : 0, g_state.balancing ? 1 : 0,
            (unsigned)g_state.dbgUiMs, millis() / 1000UL,
+           g_state.batteryV, g_state.batteryLow ? 1 : 0,
            (unsigned)g_state.dbgGapMs, (unsigned)g_state.dbgGapPhase,
            (unsigned)g_state.dbgLoopMs, (unsigned)g_state.dbgBalMs,
            (unsigned)g_state.dbgHeadMs, (unsigned)g_state.dbgBatMs,
@@ -330,6 +449,9 @@ namespace Tuner {
 bool begin() {
   // Routes enregistrées une seule fois, indépendamment de la radio.
   s_server.on("/",           HTTP_GET,  handleRoot);
+  s_server.on("/drive",      HTTP_GET,  handleDrive);
+  s_server.on("/api/cmd",    HTTP_GET,  handleCmd);    // secours sendBeacon/keepalive
+  s_server.on("/api/cmd",    HTTP_POST, handleCmd);
   s_server.on("/api/state",  HTTP_GET,  handleState);
   s_server.on("/api/touch",  HTTP_GET,  handleTouch);
   s_server.on("/api/gains",  HTTP_POST, handleGains);

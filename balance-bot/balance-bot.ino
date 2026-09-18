@@ -23,6 +23,7 @@
 #include "config.h"
 #include "interfaces.h"
 #include "tuner.h"
+#include "ui.h"          // Ui::showTip() (appui court KEY)
 
 // État global unique — défini ICI, déclaré extern dans interfaces.h
 BotState g_state;
@@ -67,7 +68,8 @@ void setup() {
   digitalWrite(PIN_POWER_ON, HIGH);
 
   // Boutons : BOOT (GPIO 0) = ARRÊT D'URGENCE (appui > ESTOP_HOLD_MS),
-  // KEY (GPIO 14) = ouvrir/fermer le banc de réglage web (appui long).
+  // KEY (GPIO 14) = appui LONG : ouvrir/fermer le banc web ; appui COURT :
+  // écran pourboire (QR Lightning — ROADMAP 4.2 étape 1).
   pinMode(PIN_ESTOP, INPUT_PULLUP);
   pinMode(PIN_TUNER_TOGGLE, INPUT_PULLUP);
 
@@ -194,7 +196,8 @@ void loop() {
   // ── Banc de réglage web ─────────────────────────────────────────
   // Le serveur HTTP vit sur sa propre tâche (TUNER_TASK_CORE) : plus rien
   // à cadencer ici. Appui long (TUNER_TOGGLE_HOLD_MS) sur KEY (GPIO 14)
-  // = ouvrir/fermer l'AP. (BOOT est réservé à l'arrêt d'urgence.)
+  // = ouvrir/fermer l'AP ; appui COURT = écran pourboire (QR Lightning).
+  // (BOOT est réservé à l'arrêt d'urgence.)
   static unsigned long keyDownMs = 0;
   static bool keyDone = false;
   static bool keyPrev = false;
@@ -207,6 +210,12 @@ void loop() {
     // Aucun Serial ici (STALL_ANALYSIS.md §6, REVIEW_CLAUDE M14) : la
     // trace « OUVERT / FERMÉ » est écrite par la tâche du tuner.
     (void)Tuner::toggle();
+    s_lastPhase = 3;
+  } else if (!keyNow && keyPrev && !keyDone) {
+    // Appui COURT sur KEY (relâché avant TUNER_TOGGLE_HOLD_MS) : écran
+    // pourboire (QR Lightning statique, TIP_LN_ADDRESS dans config.h).
+    // Du dessin uniquement — aucune consigne, l'équilibre n'est pas touché.
+    Ui::showTip();
     s_lastPhase = 3;
   }
   keyPrev = keyNow;

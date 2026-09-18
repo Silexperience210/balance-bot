@@ -33,4 +33,11 @@ namespace Ui {
   // ms = durée d'affichage, sweep = fait balayer le regard (test de charge).
   // Permet de valider les expressions à l'écran sans lancer l'asservissement.
   void  previewFace(uint8_t expr, unsigned long ms, bool sweep = false);
+
+  // Écran POURBOIRE (ROADMAP 4.2 étape 1) : affiche le QR statique de
+  // l'adresse Lightning (config.h, TIP_LN_ADDRESS) pendant TIP_QR_HOLD_MS,
+  // puis retour automatique à l'écran courant. Un tap ferme plus tôt.
+  // Appelé par le .ino sur appui COURT de KEY — sûr à tout moment : c'est
+  // du dessin, jamais une commande (l'équilibre n'y touche pas).
+  void  showTip();
 }

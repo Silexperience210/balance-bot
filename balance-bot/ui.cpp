@@ -28,6 +28,8 @@
 #define TOUCH_MODULES_CST_SELF
 #include "TouchLib.h"
 #include "Wire.h"
+// qrcode.h = composant espressif__qrcode du cœur ESP32 (IDF) — QR pourboire
+#include "qrcode.h"
 #include "config.h"
 #include "interfaces.h"
 #include <string.h>
@@ -809,6 +811,124 @@ void uiAutoLoop() {
   s_irisR = nr;
 }
 
+// ── Écran POURBOIRE (QR Lightning statique — ROADMAP 4.2 étape 1) ──
+// Appui court sur KEY (.ino) → Ui::showTip(). L'écran préempte visage ET
+// boutons pendant TIP_QR_HOLD_MS ; un tap ferme plus tôt. C'est du DESSIN
+// uniquement : aucune consigne n'est touchée, l'équilibre continue de
+// tourner — même contrainte que l'écran STOP, dont on reprend le dessin
+// étalé sur plusieurs images (un fillScreen d'un coup coûte ~22 ms).
+// Le QR encode « lightning:TIP_LN_ADDRESS » (config.h) : chaîne PUBLIQUE.
+//
+// Génération : composant espressif__qrcode LIVRÉ avec le cœur ESP32
+// (esp32:esp32 3.x, <qrcode.h> IDF) — aucune bibliothèque externe à
+// installer, rien à ajouter à la CI. Il choisit lui-même la plus petite
+// version qui contient le texte (modules plus gros = scan plus facile).
+constexpr int kQrModulesMax = 4 * TIP_QR_MAX_VERSION + 17;   // 41 en v6
+uint8_t  s_qrBits[(kQrModulesMax * kQrModulesMax + 7) / 8];  // 1 bit par module
+uint8_t  s_qrSize  = 0;        // modules de côté (0 = pas de QR valide)
+uint8_t  s_qrScale = 1;
+int16_t  s_qrX0 = 0, s_qrY0 = 0;
+int16_t  s_qrSide = 0;
+bool     s_tipRequest = false;   // posé par Ui::showTip() (même fil que loop())
+bool     s_tipShown   = false;
+uint8_t  s_tipStep    = 0;       // 0,1 fond · 2 modules · 3 textes · ≥4 fini
+unsigned long s_tipUntil = 0;
+bool     s_tipPrevTouch = false;
+
+bool tipQrModule(int x, int y) {
+  const int i = y * s_qrSize + x;
+  return (s_qrBits[i >> 3] >> (i & 7)) & 1;
+}
+
+// Rappel d'esp_qrcode_generate() : le handle n'est valide que le temps de
+// l'appel → on COPIE les modules dans s_qrBits pour les tracer ensuite,
+// étalés sur leur propre image.
+void tipQrCopy(esp_qrcode_handle_t qr) {
+  const int n = esp_qrcode_get_size(qr);
+  if (n <= 0 || n > kQrModulesMax) return;      // s_qrSize reste à 0
+  s_qrSize = (uint8_t)n;
+  memset(s_qrBits, 0, sizeof(s_qrBits));
+  for (int y = 0; y < n; y++)
+    for (int x = 0; x < n; x++)
+      if (esp_qrcode_get_module(qr, x, y))
+        s_qrBits[(y * n + x) >> 3] |= (uint8_t)(1 << ((y * n + x) & 7));
+}
+
+// Construit le QR (CPU seul, quelques ms, cœur 1) + calcule son placement :
+// carré le plus grand possible à gauche, texte à droite. La zone de
+// tranquillité (quiet zone) est simplement le fond blanc tout autour.
+void tipBuildQr() {
+  char payload[160];
+  snprintf(payload, sizeof(payload), "lightning:%s", TIP_LN_ADDRESS);
+  s_qrSize = 0;                                 // invalide tant que pas copié
+  esp_qrcode_config_t cfg;
+  cfg.display_func       = tipQrCopy;
+  cfg.max_qrcode_version = TIP_QR_MAX_VERSION;
+  cfg.qrcode_ecc_level   = ESP_QRCODE_ECC_LOW;  // suffit pour un écran propre
+  esp_qrcode_generate(&cfg, payload);           // échec → s_qrSize == 0, le
+  if (s_qrSize == 0) return;                    // texte « adresse trop longue »
+  s_qrScale = (uint8_t)max(1, min((WIDTH - 150) / s_qrSize, HEIGHT / s_qrSize));
+  s_qrSide  = s_qrSize * s_qrScale;
+  s_qrX0    = 8 + (HEIGHT - s_qrSide) / 2;
+  s_qrY0    = (HEIGHT - s_qrSide) / 2;
+}
+
+// Renvoie true tant que l'écran pourboire est affiché (Ui::loop s'arrête
+// là pour cette image). false = fermé (tap ou délai écoulé), à redessiner.
+bool tipLoop(unsigned long now) {
+  readTouch();
+  const bool tap = g_touchedRaw && !s_tipPrevTouch;
+  s_tipPrevTouch = g_touchedRaw;
+  if (tap || (long)(now - s_tipUntil) >= 0) return false;
+
+  if (s_tipStep > 3) return true;                // tout est dessiné
+  const unsigned long t0 = micros();
+  switch (s_tipStep) {
+    case 0: g_tft.fillRect(0, 0, WIDTH, HEIGHT / 2, TFT_WHITE); break;
+    case 1: g_tft.fillRect(0, HEIGHT / 2, WIDTH, HEIGHT - HEIGHT / 2, TFT_WHITE); break;
+    case 2:
+      // Modules noirs, tracés par SEGMENTS horizontaux (run-length) : ~100
+      // fillRect au lieu de ~420 modules unitaires.
+      if (s_qrSize > 0) {
+        for (int y = 0; y < s_qrSize; y++) {
+          int x = 0;
+          while (x < s_qrSize) {
+            if (!tipQrModule(x, y)) { x++; continue; }
+            int x2 = x;
+            while (x2 < s_qrSize && tipQrModule(x2, y)) x2++;
+            g_tft.fillRect(s_qrX0 + x * s_qrScale, s_qrY0 + y * s_qrScale,
+                           (x2 - x) * s_qrScale, s_qrScale, TFT_BLACK);
+            x = x2;
+          }
+        }
+      }
+      break;
+    case 3: {
+      g_tft.setTextDatum(TL_DATUM);
+      g_tft.setTextColor(TFT_BLACK, TFT_WHITE);
+      const int tx = s_qrX0 + s_qrSide + 12;
+      g_tft.setTextSize(2);
+      g_tft.drawString("POURBOIRE", tx, 22);
+      g_tft.setTextSize(1);
+      if (s_qrSize > 0) {
+        g_tft.drawString("scannez pour offrir", tx, 52);
+        g_tft.drawString("quelques sats", tx, 64);
+        g_tft.drawString("via Lightning", tx, 76);
+        g_tft.setTextColor(TFT_DARKGREY, TFT_WHITE);
+        g_tft.drawString(TIP_LN_ADDRESS, 8, HEIGHT - 12);
+      } else {
+        g_tft.drawString("adresse trop longue", tx, 52);
+        g_tft.drawString("(voir config.h)", tx, 64);
+      }
+      break;
+    }
+  }
+  s_tipStep++;
+  const unsigned long dt = (micros() - t0) / 1000UL;
+  if (dt > g_state.dbgDrawMaxMs) g_state.dbgDrawMaxMs = (uint16_t)min(dt, 65535UL);
+  return true;
+}
+
 }  // namespace
 
 // Redessine le bouton i en entier.
@@ -994,6 +1114,34 @@ void Ui::loop() {
   static bool s_wasAuto = false;
   const bool autoMode = Balance::isEnabled() ||
                         (s_faceForced && millis() < s_forcedUntil);
+
+  // ── Écran pourboire (QR Lightning) : préempte visage et boutons ──
+  // Ouvert par appui court sur KEY (.ino → Ui::showTip()). À la fermeture
+  // on force le redessin complet de l'écran du mode courant : le QR a tout
+  // passé en blanc.
+  if (s_tipRequest && !s_tipShown) {
+    s_tipRequest   = false;
+    s_tipShown     = true;
+    s_tipStep      = 0;
+    s_tipUntil     = millis() + TIP_QR_HOLD_MS;
+    s_tipPrevTouch = true;      // un doigt déjà posé ne ferme pas le QR
+    tipBuildQr();
+  }
+  if (s_tipShown) {
+    if (tipLoop(millis())) return;
+    s_tipShown = false;
+    if (autoMode) {                      // retour au visage
+      faceEnter();                       // caches + bandes d'effacement
+      s_wasAuto = true;
+      uiAutoLoop();
+    } else {                             // retour à l'écran de commande
+      s_wasAuto = false;
+      faceLeave();                       // verrou tactile + caches MANUEL
+      drawStatic();
+    }
+    return;
+  }
+
   if (autoMode) {
     if (!s_wasAuto) { s_wasAuto = true; faceEnter(); }   // front MANUEL → AUTO
     uiAutoLoop();
@@ -1192,4 +1340,10 @@ void Ui::previewFace(uint8_t expr, unsigned long ms, bool sweep) {
   // 27 h et rendait l'écran MANUEL inaccessible (FACE_REVIEW.md constat 9).
   s_forcedUntil = millis() + (ms > 60000UL ? 60000UL : ms);
   s_faceForced  = true;              // publié EN DERNIER (tâche tuner → loop())
+}
+
+// Demande l'écran pourboire (appui court sur KEY, .ino). Même fil d'appel
+// que Ui::loop() : un simple drapeau suffit, consommé à la prochaine image.
+void Ui::showTip() {
+  s_tipRequest = true;
 }

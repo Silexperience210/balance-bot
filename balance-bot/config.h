@@ -166,3 +166,15 @@
 // l'obstacle a été vu ». Tête légère (SG90 + HC-SR04 ≈ 20 g) à 30 °/s :
 // perturbation négligeable devant les corrections de roues.
 #define HEAD_BALANCE_SWEEP_DEG 30
+
+// ── Pourboire Lightning (ROADMAP 4.2, étape 1 — QR STATIQUE) ───────
+// Adresse Lightning PUBLIQUE affichée en QR sur l'écran (appui court sur
+// KEY, GPIO 14). Ce n'est PAS un secret : une adresse Lightning est faite
+// pour être diffusée — la mettre dans config.h ne donne à personne
+// d'autre pouvoir que celui de nous payer. À PERSONNALISER avec votre
+// adresse (walletofsatoshi, LNbits « LNURLp », etc.). Le QR contient
+// « lightning:<adresse> » : les portefeuilles la résolvent en LNURL-pay.
+// Étape 2 (facture LNbits dynamique) : non implémentée — voir le rapport.
+#define TIP_LN_ADDRESS   "balancebot@walletofsatoshi.com"
+#define TIP_QR_HOLD_MS   20000   // retour automatique au visage/à l'écran
+#define TIP_QR_MAX_VERSION 6     // capacité byte ECC-L : 134 car. (largement assez)
