@@ -89,6 +89,33 @@ MODE = "roue"            # "roue" = le robot réel | "arc" = ancienne mécanique
 RECENTER_PERIOD = 0.100              # 10 Hz
 RECENTER_VEL_MAX, RECENTER_REF_MAX, RECENTER_SLEW = 20.0, 6.0, 3.0
 FOOT_VEL_TAU, FOOT_PANIC = 0.08, 35.0
+# ── Consignes de DÉPLACEMENT (balance.cpp l.178-183, l.673-692, l.751-758) ──
+# Avancer = incliner la consigne d'angle (kTiltPerCmd) ; tourner = différentiel
+# de vitesse entre les deux roues (kTurnPerCmd). Les deux consignes UI
+# (cmdForward / cmdTurn, −100..100) sont LISSÉES à kCmdSlewPerS. L'évitement
+# d'obstacle (head.cpp → g_state.avoidFwdMax / avoidTurn) n'entre QUE par ici,
+# AVANT le lissage : un plafond sur la marche avant (négatif = recul imposé) et
+# un pivot imposé si l'UI ne tourne pas. Jamais sur le PID ni sur les roues.
+SETPOINT_DEG = 0.0                   # kSetpointDeg
+TILT_PER_CMD = 0.06                  # kTiltPerCmd  : ° de consigne par unité de cmdForward
+TURN_PER_CMD = 0.30                  # kTurnPerCmd  : unités de sortie par unité de cmdTurn
+CMD_SLEW_PER_S = 200.0               # kCmdSlewPerS : lissage des consignes (unités/s)
+# Voie des roues (m), plans médians des pneus : faces externes des roues à
+# 146,87 mm (chassis/assets/exporter_parts_web.py TRACK), pneu centré 4 mm en
+# dedans → 138,87 mm. Sert UNIQUEMENT à la cinématique du lacet ci-dessous —
+# le firmware n'a ni cap ni odométrie (head.cpp l.10-15), le lacet est une
+# grandeur du SIMULATEUR (pour voir le pivot), pas une grandeur du robot.
+TRACK = 0.13887
+
+
+def slew(current, target, max_step):
+    """balance.cpp slew() : rampe bornée vers la cible."""
+    delta = target - current
+    if delta > max_step:
+        return current + max_step
+    if delta < -max_step:
+        return current - max_step
+    return target
 
 
 class Sim:
@@ -96,6 +123,13 @@ class Sim:
         self.kp, self.ki, self.kd = kp, ki, kd
         self.cascade, self.kp_phi, self.kv = cascade, kp_phi, kv
         self.k_out = k_out               # kOutToFootDegS : °/s de pied par unité de sortie
+        # ENTRÉES de déplacement (ce que g_state porte dans le firmware) — posées
+        # de l'extérieur (UI, tête), conservées par reset() comme les gains :
+        self.cmd_forward = 0             # g_state.cmdForward (−100..100)
+        self.cmd_turn = 0                # g_state.cmdTurn    (−100..100)
+        self.avoid_fwd_max = 100         # g_state.avoidFwdMax (100 libre · 40 ralenti · 0 stop · <0 recul)
+        self.avoid_turn = 0              # g_state.avoidTurn   (pivot imposé si l'UI ne tourne pas)
+        self.obstacle_warn = False       # g_state.obstacleWarn (< US_STOP_CM)
         self.reset()
 
     def reset(self):
@@ -105,6 +139,12 @@ class Sim:
         self.recenter_vel = self.foot_vel_filt = 0.0
         self.recenter_last = 0.0
         self.panicked = False
+        # couche déplacement : consignes lissées (halt() les vide aussi), voie
+        # différentielle et pose au sol
+        self.fwd_smooth = self.turn_smooth = 0.0   # s_fwdSmooth / s_turnSmooth
+        self.phi_diff = self.phi_diff_cmd = 0.0    # (φ_G − φ_D)/2 : réel / commandé (°)
+        self.psi = 0.0                             # lacet (rad, + = vers la droite)
+        self.pos_x = self.pos_z = 0.0              # axe des roues au sol (m)
 
     # ── PID + cascade, à l'identique de balance.cpp ──────────────────
     def ctrl(self, noise, t):
@@ -119,6 +159,19 @@ class Sim:
         pt, rt = self.theta * 180 / math.pi, self.dtheta * 180 / math.pi
         self.pitch_f += ((pt + random.gauss(0, noise * 0.15)) - self.pitch_f) * (DT / tau_f)
         self.rate_f += ((rt + random.gauss(0, noise * 1.5)) - self.rate_f) * (DT / tau_f)
+
+        # ── Consignes UI + évitement (balance.cpp l.673-692), AVANT le lissage ──
+        cmd_fwd = max(-100, min(100, self.cmd_forward))
+        cmd_turn = max(-100, min(100, self.cmd_turn))
+        if self.obstacle_warn and cmd_fwd > 0:          # l.678 : plus de marche avant
+            cmd_fwd = 0
+        if cmd_fwd > self.avoid_fwd_max:                # l.687 : plafond / recul imposé (min)
+            cmd_fwd = self.avoid_fwd_max
+        if cmd_turn == 0 and self.avoid_turn != 0:      # l.688 : pivot si l'UI ne tourne pas
+            cmd_turn = max(-100, min(100, self.avoid_turn))
+        max_step = CMD_SLEW_PER_S * DT                  # l.690-692 (dt = DT ici)
+        self.fwd_smooth = slew(self.fwd_smooth, float(cmd_fwd), max_step)
+        self.turn_smooth = slew(self.turn_smooth, float(cmd_turn), max_step)
 
         # boucle EXTERNE de la cascade (10 Hz), sur φ = phi_cmd (ce que lit feet.cpp)
         if self.cascade:
@@ -150,7 +203,8 @@ class Sim:
             ref = max(-RECENTER_REF_MAX, min(RECENTER_REF_MAX,
                                              -self.kv * (self.recenter_vel - self.foot_vel_filt)))
 
-        setpoint = ref
+        # balance.cpp l.724-725 : kSetpointDeg + s_fwdSmooth·kTiltPerCmd + recenterSetpoint()
+        setpoint = SETPOINT_DEG + self.fwd_smooth * TILT_PER_CMD + ref
         err = setpoint - self.pitch_f
         if abs(err) < DEADBAND:
             err = 0.0
@@ -180,15 +234,32 @@ class Sim:
         self.foot_vel_filt += alpha * (cmd_vel - self.foot_vel_filt)
         return out
 
-    def run(self, theta0, tmax, noise, push=None):
+    def run(self, theta0, tmax, noise, push=None, pilote=None):
+        """pilote(sim, t), facultatif : appelé au DÉBUT de chaque pas, avant le
+        correcteur — c'est là que le firmware lit g_state (cmdForward, cmdTurn,
+        avoidFwdMax, avoidTurn, obstacleWarn écrits par l'UI et la tête). Sert
+        à scénariser un déplacement ou un évitement (selfcheck.js §6)."""
         self.reset()
         self.theta = theta0 * math.pi / 180
         push_t, push_v = push or (0, 0)
         for k in range(int(tmax / DT)):
             t = k * DT
-            # câblage stabilisant (comme le firmware) puis °/s de pied via k_out
-            # (Feet::driveFootSpeed(out · kOutToFootDegS))
-            u = -self.ctrl(noise, t) * self.k_out
+            if pilote:
+                pilote(self, t)
+            # câblage stabilisant (comme le firmware) : `out` de balance.cpp
+            # est la sortie PID INVERSÉE (l.741).
+            out = -self.ctrl(noise, t)
+            # Différentiel de rotation (balance.cpp l.751-758) : roue G = out +
+            # turn, roue D = out − turn, chacune bornée, puis °/s de pied via
+            # k_out (Feet::driveFootSpeed(left · kOutToFootDegS, right · …)).
+            # La MOYENNE des deux roues pilote θ (le pendule ne voit que
+            # l'axe) ; la DIFFÉRENCE ne fait que pivoter le robot (lacet).
+            # À cmdTurn = 0 : left = right = out, u = out·k_out exactement.
+            turn = self.turn_smooth * TURN_PER_CMD
+            left = max(-OUT_MAX, min(OUT_MAX, out + turn))
+            right = max(-OUT_MAX, min(OUT_MAX, out - turn))
+            u = (left + right) / 2 * self.k_out
+            u_diff = (left - right) / 2 * self.k_out
             # roue (servo 360°) : pas de butée, la roue tourne sans fin ;
             # arc : butée dure ±FOOT_HARD (ancienne mécanique).
             if MODE == "arc":
@@ -199,6 +270,13 @@ class Sim:
             dphidd = (dphi - self.prev_dphi) / DT * (math.pi / 180.0)   # rad/s²
             self.prev_dphi = dphi
             self.phi += dphi * DT
+            # Voie différentielle : même servo du 1er ordre que la moyenne
+            # (la loi est linéaire, la décomposition somme/différence est
+            # exacte hors saturation VMAX_SERVO). Lacet ψ = (φ_G − φ_D)·R/TRACK.
+            self.phi_diff_cmd += u_diff * DT
+            dphi_diff = max(-VMAX_SERVO, min(VMAX_SERVO, (self.phi_diff_cmd - self.phi_diff) / TAU_SERVO))
+            self.phi_diff += dphi_diff * DT
+            self.psi = 2.0 * self.phi_diff * (math.pi / 180.0) * R / TRACK
             # Lagrange (voir docstring) : θ̈·(R² + 2Rh cosθ + h²)
             #   = g·h·sinθ − φ̈·R·(R + h·cosθ) + R·h·sinθ·θ̇²
             cos_t, sin_t = math.cos(self.theta), math.sin(self.theta)
@@ -209,6 +287,11 @@ class Sim:
                 self.dtheta += push_v
             self.dtheta += thdd * DT
             self.theta += self.dtheta * DT
+            # Pose au sol : roulement sans glissement le long du cap, l'axe
+            # avance de R·(Δθ + Δφ) (x_axe = R·(θ + φ) à ψ = 0).
+            ds = R * (self.dtheta * DT + dphi * DT * (math.pi / 180.0))
+            self.pos_x += ds * math.cos(self.psi)
+            self.pos_z += ds * math.sin(self.psi)
             self.t = t
             if abs(self.theta * 180 / math.pi) > FALL_ANGLE:
                 return False, "chute θ"

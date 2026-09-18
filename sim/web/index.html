@@ -83,10 +83,12 @@
   /* ---- Télémétrie ---- */
   #telemetrie, #tele-us { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font-variant-numeric: tabular-nums; }
   #telemetrie .nom, #tele-us .nom { color: var(--texte-dim); }
-  #us-etat.alerte { color: var(--rouge); font-weight: 700; }
+  #us-etat.alerte, #us-phase.alerte { color: var(--rouge); font-weight: 700; }
+  #us-etat.ralenti, #us-phase.ralenti { color: var(--jaune); font-weight: 600; }
   #us-etat.obstacle { color: var(--vert); }
-  #us-etat.rien { color: var(--texte-dim); }
+  #us-etat.rien, #us-phase.rien { color: var(--texte-dim); }
   p.aide-us { font-size: 11px; color: var(--texte-dim); margin: 8px 0 0; }
+  #dep-boutons button { margin: 2px 4px 2px 0; }
   #verdict.ok     { color: var(--vert); font-weight: 600; }
   #verdict.chute  { color: var(--rouge); font-weight: 600; }
   #verdict.panique{ color: var(--jaune); font-weight: 600; }
@@ -187,12 +189,50 @@
           <span class="nom">Cadence</span>         <span id="us-cadence">—</span>
           <span class="nom">Échecs consécutifs</span> <span id="us-echecs">—</span>
           <span class="nom">Tête pan / tilt</span> <span id="us-tete">—</span>
-          <span class="nom">Angle vu</span>        <span id="us-angle">—</span>
+          <span class="nom">Angle vu / côté</span> <span id="us-angle">—</span>
+          <span class="nom">Évitement</span>       <span id="us-phase" class="rien">—</span>
+          <span class="nom">Consigne imposée</span> <span id="us-avoid">—</span>
         </div>
         <p class="aide-us">Le curseur place le <b>centre</b> d'une plaque de
-          10&nbsp;mm, mesuré depuis l'axe des roues au RESET — si le robot roule,
-          la distance mesurée s'en écarte. En PAUSE la télémétrie est figée (le
-          capteur ne tique qu'en marche) alors que le faisceau suit le curseur.</p>
+          10&nbsp;mm × 10&nbsp;cm de large, mesuré depuis l'axe des roues au RESET —
+          si le robot roule ou pivote, la distance mesurée s'en écarte (lobe de
+          ±15°, comme le HC-SR04). En PAUSE la télémétrie est figée (le capteur ne
+          tique qu'en marche) alors que le faisceau suit le curseur. En équilibre
+          la tête balaie ±30° ; sous 60&nbsp;cm le robot <b>ralentit</b>, sous
+          25&nbsp;cm il <b>recule et pivote</b> du côté libre, puis pivote seul
+          après 1,5&nbsp;s — jamais en touchant à l'équilibre (head.cpp →
+          balance.cpp).</p>
+      </div>
+
+      <div class="panneau">
+        <h2>Déplacement (flèches de l'UI du robot)</h2>
+        <div class="reglage">
+          <label>Avancer</label>
+          <input type="range" id="rg-avancer" min="-100" max="100" step="5" value="0">
+          <span class="val" id="v-avancer">0</span>
+        </div>
+        <div class="reglage">
+          <label>Tourner</label>
+          <input type="range" id="rg-tourner" min="-100" max="100" step="5" value="0">
+          <span class="val" id="v-tourner">0</span>
+        </div>
+        <div id="dep-boutons">
+          <button id="btn-dep-stop">Consignes à 0</button>
+          <button id="btn-dep-demo">Démo évitement (obstacle à 25 cm)</button>
+        </div>
+        <div id="tele-us" style="margin-top:6px">
+          <span class="nom">Consigne effective</span> <span id="dep-effective">—</span>
+          <span class="nom">Lacet ψ</span>           <span id="dep-lacet">—</span>
+          <span class="nom">Position</span>          <span id="dep-pos">—</span>
+        </div>
+        <p class="aide-us">Mêmes consignes que les flèches de l'écran du robot
+          (cmdForward / cmdTurn, ±100), lissées à 200/s : avancer = incliner la
+          consigne de 0,06° par unité, tourner = différentiel de roues (0,30 par
+          unité). <b>Attention</b>, avec le jeu qui tient (Kv&nbsp;=&nbsp;0) rien ne
+          borne la vitesse : une consigne d'avance fait accélérer sans fin
+          jusqu'à la saturation des roues, puis chuter — c'est le modèle du
+          robot, pas un défaut du simulateur. L'évitement se voit le mieux à
+          consigne nulle (bouton démo).</p>
       </div>
 
       <div class="panneau">

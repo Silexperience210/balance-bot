@@ -297,3 +297,14 @@ inchangées, section 5 (extraits) :
 (même verdict « AUTO-TEST RÉUSSI » sous Chrome headless en `file://` ; rendu
 du bundle vérifié par capture : un seul module à deux transducteurs au-dessus
 de l'écran, comme la photo.)
+
+---
+
+**Post-scriptum (miroir du firmware `10044c0`, 18/09/2026)** — ce rapport décrit l'état
+au commit `2911095` : les numéros de lignes de `head.cpp` cités ci-dessus sont ceux d'AVANT
+`10044c0` (décalés d'environ +100 depuis : `kEchoTimeoutUs` l.134 → 232, cadence l.108 →
+203, `handleHeadMovement` l.181-217 → 284-333), et les deux phrases « équilibre → tête
+ramenée au centre, immobile » et « comme le firmware, il ne déclenche aucune réaction
+physique » ne sont plus vraies : la tête balaie ±30° en équilibre et le firmware évite
+l'obstacle (ralenti / recul + pivot / reprise). Le simulateur en est le miroir — voir
+`SIM_MIROIR_RAPPORT.md`, `docs/GUIDE-SIMULATEUR.md` §5 bis et `sim/web/selfcheck.js` §6-8.

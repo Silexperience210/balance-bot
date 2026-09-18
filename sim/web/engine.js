@@ -19,6 +19,10 @@
  *
  *   sim.reset(scenario)   sim.step()   sim.stepMany(n)   sim.state
  *   sim.setCustom(fn)     sim.setNoise(v)   sim.setGains({...})
+ *   sim.setBotState({cmdForward, cmdTurn, avoidFwdMax, avoidTurn, obstacleWarn})
+ *                         → les ENTRÉES de déplacement (ce que g_state porte
+ *                           dans le firmware : flèches de l'UI + évitement de
+ *                           head.cpp / ultrason.js)
  *
  * Ce qui N'EST PAS ici (et qui dominera le réel) : trame PWM 50 Hz du SG90,
  * mort-zone du servo, borne d'accélération, friction, 3D — voir la docstring
@@ -42,6 +46,25 @@
   var RECENTER_PERIOD = 0.100;              // 10 Hz
   var RECENTER_VEL_MAX = 20.0, RECENTER_REF_MAX = 6.0, RECENTER_SLEW = 3.0;
   var FOOT_VEL_TAU = 0.08, FOOT_PANIC = 35.0;
+  // ── Consignes de DÉPLACEMENT (balance.cpp l.178-183, l.673-692, l.751-758 ;
+  //    balancebot_sim.py l.92-108) ──
+  // Avancer = incliner la consigne d'angle (kTiltPerCmd) ; tourner =
+  // différentiel de vitesse entre les deux roues (kTurnPerCmd). Les deux
+  // consignes UI (cmdForward / cmdTurn, −100..100) sont LISSÉES à
+  // kCmdSlewPerS. L'évitement d'obstacle (head.cpp → avoidFwdMax /
+  // avoidTurn, transcrit dans ultrason.js) n'entre QUE par ici, AVANT le
+  // lissage : un plafond sur la marche avant (négatif = recul imposé) et un
+  // pivot imposé si l'UI ne tourne pas. Jamais sur le PID ni sur les roues.
+  var SETPOINT_DEG = 0.0;                   // kSetpointDeg
+  var TILT_PER_CMD = 0.06;                  // kTiltPerCmd  : ° de consigne par unité de cmdForward
+  var TURN_PER_CMD = 0.30;                  // kTurnPerCmd  : unités de sortie par unité de cmdTurn
+  var CMD_SLEW_PER_S = 200.0;               // kCmdSlewPerS : lissage des consignes (unités/s)
+  // Voie des roues (m), plans médians des pneus : faces externes à 146,87 mm
+  // (exporter_parts_web.py TRACK), pneu centré 4 mm en dedans → 138,87 mm.
+  // Sert UNIQUEMENT à la cinématique du lacet — le firmware n'a ni cap ni
+  // odométrie (head.cpp l.10-15) : le lacet est une grandeur du SIMULATEUR
+  // (pour voir le pivot), pas une grandeur du robot.
+  var TRACK = 0.13887;
   // ── MÉCANIQUE ──────────────────────────────────────────────────────
   // Le robot RÉEL = ROUES Ø80 + pneus Ø83 sur servos **360° continus**
   // (FS90R) : la roue tourne LIBREMENT → NI butée ±45°, NI soft clamp de
@@ -157,6 +180,13 @@
   // ═════════════════════════════════════════════════════════════════
   function isNum(v) { return typeof v === "number" && isFinite(v); }
   function pick(v, dflt) { return isNum(v) ? v : dflt; }
+  // balance.cpp slew() (l.282-287) : rampe bornée vers la cible.
+  function slew(current, target, maxStep) {
+    var delta = target - current;
+    if (delta >  maxStep) return current + maxStep;
+    if (delta < -maxStep) return current - maxStep;
+    return target;
+  }
 
   // ═════════════════════════════════════════════════════════════════
   // Valeurs par défaut, scénarios, constantes exposées
@@ -191,7 +221,9 @@
     FALL_ANGLE: FALL_ANGLE, FOOT_PANIC: FOOT_PANIC,
     RECENTER_PERIOD: RECENTER_PERIOD, RECENTER_VEL_MAX: RECENTER_VEL_MAX,
     RECENTER_REF_MAX: RECENTER_REF_MAX, RECENTER_SLEW: RECENTER_SLEW,
-    FOOT_VEL_TAU: FOOT_VEL_TAU
+    FOOT_VEL_TAU: FOOT_VEL_TAU,
+    SETPOINT_DEG: SETPOINT_DEG, TILT_PER_CMD: TILT_PER_CMD,
+    TURN_PER_CMD: TURN_PER_CMD, CMD_SLEW_PER_S: CMD_SLEW_PER_S, TRACK: TRACK
   });
 
   // ═════════════════════════════════════════════════════════════════
@@ -228,6 +260,16 @@
     var recenterVel = 0, footVelFilt = 0;
     var recenterLast = 0;
     var panicked = false;
+    // ENTRÉES de déplacement (ce que g_state porte dans le firmware) — posées
+    // de l'extérieur (setBotState), conservées par reset() comme les gains.
+    var cmdForward = 0, cmdTurn = 0;        // g_state.cmdForward / cmdTurn (−100..100)
+    var avoidFwdMax = 100, avoidTurn = 0;   // g_state.avoidFwdMax / avoidTurn (head.cpp)
+    var obstacleWarn = false;               // g_state.obstacleWarn (< US_STOP_CM)
+    // couche déplacement : consignes lissées, voie différentielle, pose au sol
+    var fwdSmooth = 0, turnSmooth = 0;      // s_fwdSmooth / s_turnSmooth
+    var phiDiff = 0, phiDiffCmd = 0;        // (φ_G − φ_D)/2 : réel / commandé (°)
+    var psi = 0;                            // lacet (rad, + = vers la droite)
+    var posX = 0, posZ = 0;                 // axe des roues au sol (m)
 
     // ── Scénario courant et déroulé (run()) ──
     var theta0Deg = 2, tmax = 6, noise = pick(options.noise, defaults.noise);
@@ -285,6 +327,17 @@
                         function (v) { if (isNum(v)) recenterVel = v; });
     prop("footVelFilt", function () { return footVelFilt; },
                         function (v) { if (isNum(v)) footVelFilt = v; });
+    // Couche déplacement (lecture seule) : consignes lissées, lacet, pose.
+    prop("cmdForward",  function () { return cmdForward; });
+    prop("cmdTurn",     function () { return cmdTurn; });
+    prop("avoidFwdMax", function () { return avoidFwdMax; });
+    prop("avoidTurn",   function () { return avoidTurn; });
+    prop("fwdSmooth",   function () { return fwdSmooth; });    // s_fwdSmooth (unités UI)
+    prop("turnSmooth",  function () { return turnSmooth; });   // s_turnSmooth
+    prop("phiDiff",     function () { return phiDiff; });      // (φ_G − φ_D)/2 (°)
+    prop("psi",         function () { return psi * 180 / Math.PI; });   // lacet (°)
+    prop("posX",        function () { return posX; });         // m
+    prop("posZ",        function () { return posZ; });         // m
     prop("noise",    function () { return noise; });
     prop("tmax",     function () { return tmax; });
     prop("k",        function () { return k; });                 // pas déjà calculés
@@ -311,6 +364,10 @@
       recenterVel = footVelFilt = 0.0;
       recenterLast = 0.0;
       panicked = false;
+      fwdSmooth = turnSmooth = 0.0;
+      phiDiff = phiDiffCmd = 0.0;
+      psi = 0.0;
+      posX = posZ = 0.0;
       // run() : θ initial, nombre de pas
       theta = theta0Deg * Math.PI / 180;
       nSteps = Math.trunc(tmax / DT);
@@ -328,6 +385,18 @@
       var pt = theta * 180 / Math.PI, rt = dtheta * 180 / Math.PI;
       pitchF += ((pt + rng.gauss(0, noise * 0.15)) - pitchF) * (DT / tauF);
       rateF  += ((rt + rng.gauss(0, noise * 1.5))  - rateF)  * (DT / tauF);
+
+      // ── Consignes UI + évitement (balance.cpp l.673-692), AVANT le lissage ──
+      var cmdFwd = Math.max(-100, Math.min(100, cmdForward));
+      var cmdTrn = Math.max(-100, Math.min(100, cmdTurn));
+      if (obstacleWarn && cmdFwd > 0) cmdFwd = 0;            // l.678 : plus de marche avant
+      if (cmdFwd > avoidFwdMax) cmdFwd = avoidFwdMax;         // l.687 : plafond / recul imposé (min)
+      if (cmdTrn === 0 && avoidTurn !== 0) {                  // l.688 : pivot si l'UI ne tourne pas
+        cmdTrn = Math.max(-100, Math.min(100, avoidTurn));
+      }
+      var maxStep = CMD_SLEW_PER_S * DT;                      // l.690-692 (dt = DT ici)
+      fwdSmooth  = slew(fwdSmooth,  cmdFwd, maxStep);
+      turnSmooth = slew(turnSmooth, cmdTrn, maxStep);
 
       // boucle EXTERNE de la cascade (10 Hz), sur φ = phi_cmd (ce que lit feet.cpp)
       if (cascade) {
@@ -360,7 +429,8 @@
                                                    -kv * (recenterVel - footVelFilt)));
       }
 
-      var setpoint = ref;
+      // balance.cpp l.724-725 : kSetpointDeg + s_fwdSmooth·kTiltPerCmd + recenterSetpoint()
+      var setpoint = SETPOINT_DEG + fwdSmooth * TILT_PER_CMD + ref;
       lastSetpoint = setpoint;
       var err = setpoint - pitchF;
       if (Math.abs(err) < DEADBAND) err = 0.0;
@@ -394,10 +464,22 @@
       if (done) return;
       var t = k * DT;                       // horodatage du pas, comme run() (t = k·DT)
 
-      // câblage stabilisant (comme le firmware) puis °/s de pied via k_out
+      // câblage stabilisant (comme le firmware) : `outFw` est la sortie PID
+      // INVERSÉE de balance.cpp (l.741).
       var out = ctrl(t);
       lastOut = out;
-      var u = -out * kOut;
+      var outFw = -out;
+      // Différentiel de rotation (balance.cpp l.751-758) : roue G = out +
+      // turn, roue D = out − turn, chacune bornée, puis °/s de pied via
+      // k_out (Feet::driveFootSpeed(left · kOutToFootDegS, right · …)).
+      // La MOYENNE des deux roues pilote θ (le pendule ne voit que l'axe) ;
+      // la DIFFÉRENCE ne fait que pivoter le robot (lacet).
+      // À cmdTurn = 0 : left = right = outFw, u = outFw·kOut exactement.
+      var turn = turnSmooth * TURN_PER_CMD;
+      var left  = Math.max(-OUT_MAX, Math.min(OUT_MAX, outFw + turn));
+      var right = Math.max(-OUT_MAX, Math.min(OUT_MAX, outFw - turn));
+      var u = (left + right) / 2 * kOut;
+      var uDiff = (left - right) / 2 * kOut;
       lastU = u;
       // roue (servo 360°) : pas de butée, la roue tourne sans fin ;
       // arc : butée dure ±FOOT_HARD (ancienne mécanique).
@@ -411,6 +493,13 @@
       prevDphi = dphi;
       lastDphi = dphi;
       phi += dphi * DT;
+      // Voie différentielle : même servo du 1er ordre que la moyenne (la loi
+      // est linéaire, la décomposition somme/différence est exacte hors
+      // saturation VMAX_SERVO). Lacet ψ = (φ_G − φ_D)·R/TRACK.
+      phiDiffCmd += uDiff * DT;
+      var dphiDiff = Math.max(-VMAX_SERVO, Math.min(VMAX_SERVO, (phiDiffCmd - phiDiff) / TAU_SERVO));
+      phiDiff += dphiDiff * DT;
+      psi = 2.0 * phiDiff * (Math.PI / 180.0) * R / TRACK;
       // Lagrange : θ̈·(R² + 2Rh cosθ + h²) = g·h·sinθ − φ̈·R·(R + h·cosθ) + R·h·sinθ·θ̇²
       var cosT = Math.cos(theta), sinT = Math.sin(theta);
       var inertia = R * R + 2.0 * R * H * cosT + H * H;
@@ -421,6 +510,11 @@
       }
       dtheta += thdd * DT;
       theta += dtheta * DT;
+      // Pose au sol : roulement sans glissement le long du cap, l'axe avance
+      // de R·(Δθ + Δφ) (x_axe = R·(θ + φ) à ψ = 0).
+      var ds = R * (dtheta * DT + dphi * DT * (Math.PI / 180.0));
+      posX += ds * Math.cos(psi);
+      posZ += ds * Math.sin(psi);
       tNow = t;
       k++;
 
@@ -454,6 +548,19 @@
       if (isNum(v)) noise = v;
     }
 
+    // Entrées de déplacement (g_state du firmware) : flèches de l'UI
+    // (cmdForward / cmdTurn) et évitement publié par head.cpp / ultrason.js
+    // (avoidFwdMax / avoidTurn / obstacleWarn). Seuls les champs fournis
+    // sont pris ; les entiers sont tronqués comme les `int` du firmware.
+    function setBotState(b) {
+      b = b || {};
+      if (isNum(b.cmdForward))  cmdForward  = Math.trunc(b.cmdForward);
+      if (isNum(b.cmdTurn))     cmdTurn     = Math.trunc(b.cmdTurn);
+      if (isNum(b.avoidFwdMax)) avoidFwdMax = Math.trunc(b.avoidFwdMax);
+      if (isNum(b.avoidTurn))   avoidTurn   = Math.trunc(b.avoidTurn);
+      if (b.obstacleWarn !== undefined) obstacleWarn = !!b.obstacleWarn;
+    }
+
     // Réglage à chaud : seuls les champs fournis (et finis) sont pris ; pas
     // de bornes (le sim sert à CHERCHER des gains, contrairement au firmware
     // qui borne les siens).
@@ -479,7 +586,8 @@
       state: state,
       setCustom: setCustom,
       setNoise: setNoise,
-      setGains: setGains
+      setGains: setGains,
+      setBotState: setBotState
     };
   }
 

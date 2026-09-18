@@ -83,10 +83,12 @@
   /* ---- Télémétrie ---- */
   #telemetrie, #tele-us { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font-variant-numeric: tabular-nums; }
   #telemetrie .nom, #tele-us .nom { color: var(--texte-dim); }
-  #us-etat.alerte { color: var(--rouge); font-weight: 700; }
+  #us-etat.alerte, #us-phase.alerte { color: var(--rouge); font-weight: 700; }
+  #us-etat.ralenti, #us-phase.ralenti { color: var(--jaune); font-weight: 600; }
   #us-etat.obstacle { color: var(--vert); }
-  #us-etat.rien { color: var(--texte-dim); }
+  #us-etat.rien, #us-phase.rien { color: var(--texte-dim); }
   p.aide-us { font-size: 11px; color: var(--texte-dim); margin: 8px 0 0; }
+  #dep-boutons button { margin: 2px 4px 2px 0; }
   #verdict.ok     { color: var(--vert); font-weight: 600; }
   #verdict.chute  { color: var(--rouge); font-weight: 600; }
   #verdict.panique{ color: var(--jaune); font-weight: 600; }
@@ -187,12 +189,50 @@
           <span class="nom">Cadence</span>         <span id="us-cadence">—</span>
           <span class="nom">Échecs consécutifs</span> <span id="us-echecs">—</span>
           <span class="nom">Tête pan / tilt</span> <span id="us-tete">—</span>
-          <span class="nom">Angle vu</span>        <span id="us-angle">—</span>
+          <span class="nom">Angle vu / côté</span> <span id="us-angle">—</span>
+          <span class="nom">Évitement</span>       <span id="us-phase" class="rien">—</span>
+          <span class="nom">Consigne imposée</span> <span id="us-avoid">—</span>
         </div>
         <p class="aide-us">Le curseur place le <b>centre</b> d'une plaque de
-          10&nbsp;mm, mesuré depuis l'axe des roues au RESET — si le robot roule,
-          la distance mesurée s'en écarte. En PAUSE la télémétrie est figée (le
-          capteur ne tique qu'en marche) alors que le faisceau suit le curseur.</p>
+          10&nbsp;mm × 10&nbsp;cm de large, mesuré depuis l'axe des roues au RESET —
+          si le robot roule ou pivote, la distance mesurée s'en écarte (lobe de
+          ±15°, comme le HC-SR04). En PAUSE la télémétrie est figée (le capteur ne
+          tique qu'en marche) alors que le faisceau suit le curseur. En équilibre
+          la tête balaie ±30° ; sous 60&nbsp;cm le robot <b>ralentit</b>, sous
+          25&nbsp;cm il <b>recule et pivote</b> du côté libre, puis pivote seul
+          après 1,5&nbsp;s — jamais en touchant à l'équilibre (head.cpp →
+          balance.cpp).</p>
+      </div>
+
+      <div class="panneau">
+        <h2>Déplacement (flèches de l'UI du robot)</h2>
+        <div class="reglage">
+          <label>Avancer</label>
+          <input type="range" id="rg-avancer" min="-100" max="100" step="5" value="0">
+          <span class="val" id="v-avancer">0</span>
+        </div>
+        <div class="reglage">
+          <label>Tourner</label>
+          <input type="range" id="rg-tourner" min="-100" max="100" step="5" value="0">
+          <span class="val" id="v-tourner">0</span>
+        </div>
+        <div id="dep-boutons">
+          <button id="btn-dep-stop">Consignes à 0</button>
+          <button id="btn-dep-demo">Démo évitement (obstacle à 25 cm)</button>
+        </div>
+        <div id="tele-us" style="margin-top:6px">
+          <span class="nom">Consigne effective</span> <span id="dep-effective">—</span>
+          <span class="nom">Lacet ψ</span>           <span id="dep-lacet">—</span>
+          <span class="nom">Position</span>          <span id="dep-pos">—</span>
+        </div>
+        <p class="aide-us">Mêmes consignes que les flèches de l'écran du robot
+          (cmdForward / cmdTurn, ±100), lissées à 200/s : avancer = incliner la
+          consigne de 0,06° par unité, tourner = différentiel de roues (0,30 par
+          unité). <b>Attention</b>, avec le jeu qui tient (Kv&nbsp;=&nbsp;0) rien ne
+          borne la vitesse : une consigne d'avance fait accélérer sans fin
+          jusqu'à la saturation des roues, puis chuter — c'est le modèle du
+          robot, pas un défaut du simulateur. L'évitement se voit le mieux à
+          consigne nulle (bouton démo).</p>
       </div>
 
       <div class="panneau">
@@ -1360,6 +1400,10 @@
  *
  *   sim.reset(scenario)   sim.step()   sim.stepMany(n)   sim.state
  *   sim.setCustom(fn)     sim.setNoise(v)   sim.setGains({...})
+ *   sim.setBotState({cmdForward, cmdTurn, avoidFwdMax, avoidTurn, obstacleWarn})
+ *                         → les ENTRÉES de déplacement (ce que g_state porte
+ *                           dans le firmware : flèches de l'UI + évitement de
+ *                           head.cpp / ultrason.js)
  *
  * Ce qui N'EST PAS ici (et qui dominera le réel) : trame PWM 50 Hz du SG90,
  * mort-zone du servo, borne d'accélération, friction, 3D — voir la docstring
@@ -1383,6 +1427,25 @@
   var RECENTER_PERIOD = 0.100;              // 10 Hz
   var RECENTER_VEL_MAX = 20.0, RECENTER_REF_MAX = 6.0, RECENTER_SLEW = 3.0;
   var FOOT_VEL_TAU = 0.08, FOOT_PANIC = 35.0;
+  // ── Consignes de DÉPLACEMENT (balance.cpp l.178-183, l.673-692, l.751-758 ;
+  //    balancebot_sim.py l.92-108) ──
+  // Avancer = incliner la consigne d'angle (kTiltPerCmd) ; tourner =
+  // différentiel de vitesse entre les deux roues (kTurnPerCmd). Les deux
+  // consignes UI (cmdForward / cmdTurn, −100..100) sont LISSÉES à
+  // kCmdSlewPerS. L'évitement d'obstacle (head.cpp → avoidFwdMax /
+  // avoidTurn, transcrit dans ultrason.js) n'entre QUE par ici, AVANT le
+  // lissage : un plafond sur la marche avant (négatif = recul imposé) et un
+  // pivot imposé si l'UI ne tourne pas. Jamais sur le PID ni sur les roues.
+  var SETPOINT_DEG = 0.0;                   // kSetpointDeg
+  var TILT_PER_CMD = 0.06;                  // kTiltPerCmd  : ° de consigne par unité de cmdForward
+  var TURN_PER_CMD = 0.30;                  // kTurnPerCmd  : unités de sortie par unité de cmdTurn
+  var CMD_SLEW_PER_S = 200.0;               // kCmdSlewPerS : lissage des consignes (unités/s)
+  // Voie des roues (m), plans médians des pneus : faces externes à 146,87 mm
+  // (exporter_parts_web.py TRACK), pneu centré 4 mm en dedans → 138,87 mm.
+  // Sert UNIQUEMENT à la cinématique du lacet — le firmware n'a ni cap ni
+  // odométrie (head.cpp l.10-15) : le lacet est une grandeur du SIMULATEUR
+  // (pour voir le pivot), pas une grandeur du robot.
+  var TRACK = 0.13887;
   // ── MÉCANIQUE ──────────────────────────────────────────────────────
   // Le robot RÉEL = ROUES Ø80 + pneus Ø83 sur servos **360° continus**
   // (FS90R) : la roue tourne LIBREMENT → NI butée ±45°, NI soft clamp de
@@ -1498,6 +1561,13 @@
   // ═════════════════════════════════════════════════════════════════
   function isNum(v) { return typeof v === "number" && isFinite(v); }
   function pick(v, dflt) { return isNum(v) ? v : dflt; }
+  // balance.cpp slew() (l.282-287) : rampe bornée vers la cible.
+  function slew(current, target, maxStep) {
+    var delta = target - current;
+    if (delta >  maxStep) return current + maxStep;
+    if (delta < -maxStep) return current - maxStep;
+    return target;
+  }
 
   // ═════════════════════════════════════════════════════════════════
   // Valeurs par défaut, scénarios, constantes exposées
@@ -1532,7 +1602,9 @@
     FALL_ANGLE: FALL_ANGLE, FOOT_PANIC: FOOT_PANIC,
     RECENTER_PERIOD: RECENTER_PERIOD, RECENTER_VEL_MAX: RECENTER_VEL_MAX,
     RECENTER_REF_MAX: RECENTER_REF_MAX, RECENTER_SLEW: RECENTER_SLEW,
-    FOOT_VEL_TAU: FOOT_VEL_TAU
+    FOOT_VEL_TAU: FOOT_VEL_TAU,
+    SETPOINT_DEG: SETPOINT_DEG, TILT_PER_CMD: TILT_PER_CMD,
+    TURN_PER_CMD: TURN_PER_CMD, CMD_SLEW_PER_S: CMD_SLEW_PER_S, TRACK: TRACK
   });
 
   // ═════════════════════════════════════════════════════════════════
@@ -1569,6 +1641,16 @@
     var recenterVel = 0, footVelFilt = 0;
     var recenterLast = 0;
     var panicked = false;
+    // ENTRÉES de déplacement (ce que g_state porte dans le firmware) — posées
+    // de l'extérieur (setBotState), conservées par reset() comme les gains.
+    var cmdForward = 0, cmdTurn = 0;        // g_state.cmdForward / cmdTurn (−100..100)
+    var avoidFwdMax = 100, avoidTurn = 0;   // g_state.avoidFwdMax / avoidTurn (head.cpp)
+    var obstacleWarn = false;               // g_state.obstacleWarn (< US_STOP_CM)
+    // couche déplacement : consignes lissées, voie différentielle, pose au sol
+    var fwdSmooth = 0, turnSmooth = 0;      // s_fwdSmooth / s_turnSmooth
+    var phiDiff = 0, phiDiffCmd = 0;        // (φ_G − φ_D)/2 : réel / commandé (°)
+    var psi = 0;                            // lacet (rad, + = vers la droite)
+    var posX = 0, posZ = 0;                 // axe des roues au sol (m)
 
     // ── Scénario courant et déroulé (run()) ──
     var theta0Deg = 2, tmax = 6, noise = pick(options.noise, defaults.noise);
@@ -1626,6 +1708,17 @@
                         function (v) { if (isNum(v)) recenterVel = v; });
     prop("footVelFilt", function () { return footVelFilt; },
                         function (v) { if (isNum(v)) footVelFilt = v; });
+    // Couche déplacement (lecture seule) : consignes lissées, lacet, pose.
+    prop("cmdForward",  function () { return cmdForward; });
+    prop("cmdTurn",     function () { return cmdTurn; });
+    prop("avoidFwdMax", function () { return avoidFwdMax; });
+    prop("avoidTurn",   function () { return avoidTurn; });
+    prop("fwdSmooth",   function () { return fwdSmooth; });    // s_fwdSmooth (unités UI)
+    prop("turnSmooth",  function () { return turnSmooth; });   // s_turnSmooth
+    prop("phiDiff",     function () { return phiDiff; });      // (φ_G − φ_D)/2 (°)
+    prop("psi",         function () { return psi * 180 / Math.PI; });   // lacet (°)
+    prop("posX",        function () { return posX; });         // m
+    prop("posZ",        function () { return posZ; });         // m
     prop("noise",    function () { return noise; });
     prop("tmax",     function () { return tmax; });
     prop("k",        function () { return k; });                 // pas déjà calculés
@@ -1652,6 +1745,10 @@
       recenterVel = footVelFilt = 0.0;
       recenterLast = 0.0;
       panicked = false;
+      fwdSmooth = turnSmooth = 0.0;
+      phiDiff = phiDiffCmd = 0.0;
+      psi = 0.0;
+      posX = posZ = 0.0;
       // run() : θ initial, nombre de pas
       theta = theta0Deg * Math.PI / 180;
       nSteps = Math.trunc(tmax / DT);
@@ -1669,6 +1766,18 @@
       var pt = theta * 180 / Math.PI, rt = dtheta * 180 / Math.PI;
       pitchF += ((pt + rng.gauss(0, noise * 0.15)) - pitchF) * (DT / tauF);
       rateF  += ((rt + rng.gauss(0, noise * 1.5))  - rateF)  * (DT / tauF);
+
+      // ── Consignes UI + évitement (balance.cpp l.673-692), AVANT le lissage ──
+      var cmdFwd = Math.max(-100, Math.min(100, cmdForward));
+      var cmdTrn = Math.max(-100, Math.min(100, cmdTurn));
+      if (obstacleWarn && cmdFwd > 0) cmdFwd = 0;            // l.678 : plus de marche avant
+      if (cmdFwd > avoidFwdMax) cmdFwd = avoidFwdMax;         // l.687 : plafond / recul imposé (min)
+      if (cmdTrn === 0 && avoidTurn !== 0) {                  // l.688 : pivot si l'UI ne tourne pas
+        cmdTrn = Math.max(-100, Math.min(100, avoidTurn));
+      }
+      var maxStep = CMD_SLEW_PER_S * DT;                      // l.690-692 (dt = DT ici)
+      fwdSmooth  = slew(fwdSmooth,  cmdFwd, maxStep);
+      turnSmooth = slew(turnSmooth, cmdTrn, maxStep);
 
       // boucle EXTERNE de la cascade (10 Hz), sur φ = phi_cmd (ce que lit feet.cpp)
       if (cascade) {
@@ -1701,7 +1810,8 @@
                                                    -kv * (recenterVel - footVelFilt)));
       }
 
-      var setpoint = ref;
+      // balance.cpp l.724-725 : kSetpointDeg + s_fwdSmooth·kTiltPerCmd + recenterSetpoint()
+      var setpoint = SETPOINT_DEG + fwdSmooth * TILT_PER_CMD + ref;
       lastSetpoint = setpoint;
       var err = setpoint - pitchF;
       if (Math.abs(err) < DEADBAND) err = 0.0;
@@ -1735,10 +1845,22 @@
       if (done) return;
       var t = k * DT;                       // horodatage du pas, comme run() (t = k·DT)
 
-      // câblage stabilisant (comme le firmware) puis °/s de pied via k_out
+      // câblage stabilisant (comme le firmware) : `outFw` est la sortie PID
+      // INVERSÉE de balance.cpp (l.741).
       var out = ctrl(t);
       lastOut = out;
-      var u = -out * kOut;
+      var outFw = -out;
+      // Différentiel de rotation (balance.cpp l.751-758) : roue G = out +
+      // turn, roue D = out − turn, chacune bornée, puis °/s de pied via
+      // k_out (Feet::driveFootSpeed(left · kOutToFootDegS, right · …)).
+      // La MOYENNE des deux roues pilote θ (le pendule ne voit que l'axe) ;
+      // la DIFFÉRENCE ne fait que pivoter le robot (lacet).
+      // À cmdTurn = 0 : left = right = outFw, u = outFw·kOut exactement.
+      var turn = turnSmooth * TURN_PER_CMD;
+      var left  = Math.max(-OUT_MAX, Math.min(OUT_MAX, outFw + turn));
+      var right = Math.max(-OUT_MAX, Math.min(OUT_MAX, outFw - turn));
+      var u = (left + right) / 2 * kOut;
+      var uDiff = (left - right) / 2 * kOut;
       lastU = u;
       // roue (servo 360°) : pas de butée, la roue tourne sans fin ;
       // arc : butée dure ±FOOT_HARD (ancienne mécanique).
@@ -1752,6 +1874,13 @@
       prevDphi = dphi;
       lastDphi = dphi;
       phi += dphi * DT;
+      // Voie différentielle : même servo du 1er ordre que la moyenne (la loi
+      // est linéaire, la décomposition somme/différence est exacte hors
+      // saturation VMAX_SERVO). Lacet ψ = (φ_G − φ_D)·R/TRACK.
+      phiDiffCmd += uDiff * DT;
+      var dphiDiff = Math.max(-VMAX_SERVO, Math.min(VMAX_SERVO, (phiDiffCmd - phiDiff) / TAU_SERVO));
+      phiDiff += dphiDiff * DT;
+      psi = 2.0 * phiDiff * (Math.PI / 180.0) * R / TRACK;
       // Lagrange : θ̈·(R² + 2Rh cosθ + h²) = g·h·sinθ − φ̈·R·(R + h·cosθ) + R·h·sinθ·θ̇²
       var cosT = Math.cos(theta), sinT = Math.sin(theta);
       var inertia = R * R + 2.0 * R * H * cosT + H * H;
@@ -1762,6 +1891,11 @@
       }
       dtheta += thdd * DT;
       theta += dtheta * DT;
+      // Pose au sol : roulement sans glissement le long du cap, l'axe avance
+      // de R·(Δθ + Δφ) (x_axe = R·(θ + φ) à ψ = 0).
+      var ds = R * (dtheta * DT + dphi * DT * (Math.PI / 180.0));
+      posX += ds * Math.cos(psi);
+      posZ += ds * Math.sin(psi);
       tNow = t;
       k++;
 
@@ -1795,6 +1929,19 @@
       if (isNum(v)) noise = v;
     }
 
+    // Entrées de déplacement (g_state du firmware) : flèches de l'UI
+    // (cmdForward / cmdTurn) et évitement publié par head.cpp / ultrason.js
+    // (avoidFwdMax / avoidTurn / obstacleWarn). Seuls les champs fournis
+    // sont pris ; les entiers sont tronqués comme les `int` du firmware.
+    function setBotState(b) {
+      b = b || {};
+      if (isNum(b.cmdForward))  cmdForward  = Math.trunc(b.cmdForward);
+      if (isNum(b.cmdTurn))     cmdTurn     = Math.trunc(b.cmdTurn);
+      if (isNum(b.avoidFwdMax)) avoidFwdMax = Math.trunc(b.avoidFwdMax);
+      if (isNum(b.avoidTurn))   avoidTurn   = Math.trunc(b.avoidTurn);
+      if (b.obstacleWarn !== undefined) obstacleWarn = !!b.obstacleWarn;
+    }
+
     // Réglage à chaud : seuls les champs fournis (et finis) sont pris ; pas
     // de bornes (le sim sert à CHERCHER des gains, contrairement au firmware
     // qui borne les siens).
@@ -1820,7 +1967,8 @@
       state: state,
       setCustom: setCustom,
       setNoise: setNoise,
-      setGains: setGains
+      setGains: setGains,
+      setBotState: setBotState
     };
   }
 
@@ -1850,18 +1998,22 @@
 </script>
   <script>
 /* ═══════════════════════════════════════════════════════════════════
- * BalanceBot — simulateur web : CAPTEUR ULTRASON + TÊTE (ultrason.js)
+ * BalanceBot — simulateur web : CAPTEUR ULTRASON + TÊTE + ÉVITEMENT (ultrason.js)
  *
  * Transcription COMPORTEMENTALE de balance-bot/head.cpp (mesure HC-SR04,
- * cadence adaptative, lissage, balayage pan/tilt). RÈGLE D'OR : mêmes
- * constantes que balance-bot/config.h, même ORDRE d'opérations que
- * head.cpp — les lignes du firmware sont citées en commentaire.
+ * cadence adaptative, lissage, balayage pan/tilt, machine à états
+ * d'évitement). RÈGLE D'OR : mêmes constantes que balance-bot/config.h,
+ * même ORDRE d'opérations que head.cpp — les lignes du firmware sont citées
+ * en commentaire (head.cpp / config.h : commit 10044c0 ; balance.cpp : 2fafb7c).
  *
  * Ce module ne contient AUCUNE physique d'équilibre : il ne lit que le
  * temps simulé (pas de 5 ms, 200 Hz = BALANCE_LOOP_HZ de config.h) et la
- * distance RÉELLE capteur→obstacle fournie par le viewer. Il ne réagit
- * pas physiquement à l'obstacle : comme le firmware, il publie seulement
- * obstacleCm / obstacleWarn / angleVu (head.cpp l.162-170).
+ * distance RÉELLE capteur→obstacle fournie par le viewer. Comme le
+ * firmware, il ne touche JAMAIS au PID : il publie obstacleCm /
+ * obstacleWarn / obstacleSlow / obstacleSide / angleVu (head.cpp
+ * l.244-273) et les CONSIGNES d'évitement avoidFwdMax / avoidTurn /
+ * avoidPhase (l.85-137), que le moteur (engine.js, miroir de balance.cpp
+ * l.673-692) applique aux consignes de déplacement AVANT leur lissage.
  *
  * Plain JS, zéro dépendance : définit UN global `window.Ultrason`
  * (export Node pour l'auto-test : `node sim/web/selfcheck.js`).
@@ -1872,26 +2024,37 @@
  *   capteur.tick(distCm, enEquilibre)        un pas de 5 ms
  *   capteur.tickMany(n, distCm, enEquilibre) n pas d'un coup
  *   capteur.setActif(bool)        false = ECHO débranché (timeouts en série)
- *   capteur.reset()               comme Head::begin() (head.cpp l.45-98)
+ *   capteur.reset()               comme Head::begin() (head.cpp l.140-193)
  *   capteur.state                 vue lecture seule (mise à jour à chaque tick)
  * ═══════════════════════════════════════════════════════════════════ */
 (function (root) {
   "use strict";
 
   // ── Constantes de balance-bot/config.h ─────────────────────────────
-  var US_MAX_CM = 150;            // config.h l.75 : portée utile du HC-SR04
-  var US_STOP_CM = 25;            // config.h l.76 : distance d'alerte
-  var HEAD_PAN_MIN = 0;           // config.h l.71
-  var HEAD_PAN_MAX = 180;         // config.h l.72
-  var HEAD_TILT_MIN = 20;         // config.h l.73
-  var HEAD_TILT_MAX = 90;         // config.h l.74
-  var DT_MS = 5;                  // 200 Hz = BALANCE_LOOP_HZ (config.h l.65)
+  var US_MAX_CM = 150;            // config.h l.103 : portée utile du HC-SR04
+  var US_STOP_CM = 25;            // config.h l.104 : ne plus avancer, reculer doucement
+  var US_SLOW_CM = 60;            // config.h l.105 : sous cette distance (et ≥ US_STOP_CM) : ralentir
+  var US_CLEAR_CM = 35;           // config.h l.163 : hystérésis, fin d'évitement seulement au-delà
+  var HEAD_PAN_MIN = 0;           // config.h l.99
+  var HEAD_PAN_MAX = 180;         // config.h l.100
+  var HEAD_TILT_MIN = 20;         // config.h l.101
+  var HEAD_TILT_MAX = 90;         // config.h l.102
+  var HEAD_BALANCE_SWEEP_DEG = 30;  // config.h l.168 : balayage ±30° autour du centre EN ÉQUILIBRE (0 = tête fixe)
+  var DT_MS = 5;                  // 200 Hz = BALANCE_LOOP_HZ (config.h l.92)
+  // Évitement (config.h l.152-163), en unités de consigne UI (−100..100).
+  var AVOID_SLOW_CMD = 40;        // l.156 : < US_SLOW_CM → marche avant plafonnée à 40 %
+  var AVOID_BACK_CMD = 20;        // l.157 : < US_STOP_CM → recul doux à 20 % (≈ 1,2° de consigne)
+  var AVOID_BACK_MAX_MS = 1500;   // l.158 : recul borné dans le temps (capteur masqué)
+  var AVOID_TURN_CMD = 40;        // l.159 : pivot vers le côté libre pendant le recul
+  var AVOID_TURN_SIGN = +1;       // l.160 : −1 si le robot pivote VERS l'obstacle au premier essai
+  var AVOID_SIDE_DEAD_DEG = 10;   // l.161 : |pan − 90| sous ce seuil → obstacle « en face »
+  var AVOID_DEFAULT_SIDE = +1;    // l.162 : côté choisi quand l'obstacle est en face
 
   // ── Constantes de balance-bot/head.cpp ─────────────────────────────
-  var US_SMOOTH_COUNT = 5;                            // l.27
-  var PAN_SPEED_DEG = 30.0, TILT_SPEED_DEG = 30.0;    // l.38-39 (°/s)
-  var PAN_CENTRE = 90.0, TILT_CENTRE = 60.0;          // l.59-62, l.194-195
-  // Timeout pulseIn : portée utile × 58 µs/cm + marge (l.134).
+  var US_SMOOTH_COUNT = 5;                            // l.39
+  var PAN_SPEED_DEG = 30.0, TILT_SPEED_DEG = 30.0;    // l.50-51 (°/s)
+  var PAN_CENTRE = 90.0, TILT_CENTRE = 60.0;          // l.45-46, l.156-157, l.184-187
+  // Timeout pulseIn : portée utile × 58 µs/cm + marge (l.232).
   var ECHO_TIMEOUT_US = US_MAX_CM * 58 + 800;         // = 9500 µs
   // Dans le core ESP32 (wiring_pulse.c), le chronomètre de pulseIn part À
   // L'APPEL : l'attente du front montant d'ECHO (~450–500 µs après TRIG sur
@@ -1902,92 +2065,176 @@
   // le négliger laisserait le simulateur « voir » des échos entre ~155 et
   // ~164 cm que le robot réel ne verrait pas.
   var ECHO_DELAI_FRONT_US = 480;
-  // Cadence adaptative : 200 ms, 1000 ms après 3 échecs consécutifs (l.108).
+  // Cadence adaptative : 200 ms, 1000 ms après 3 échecs consécutifs (l.203).
   var INTERVAL_NORMALE_MS = 200, INTERVAL_ECHEC_MS = 1000;
+  // Phases de l'évitement (head.cpp l.70 : enum AvoidPhase).
+  var AV_LIBRE = 0, AV_RALENTI = 1, AV_RECUL = 2, AV_PIVOT = 3;
 
   function create() {
     // ── Horloge simulée : ENTIÈRE en ms (5 ms par tick), comme millis() ──
     var tMs = 0;
 
     // ── État de la mesure (head.cpp) ──
-    var lastUsMeasureMs = 0;      // l.106 : 0 → 1re mesure à t = 200 ms
-    var usFailStreak = 0;         // l.107
-    var usAvg = 0.0;              // l.26 : la moyenne EST la distance lissée
-    var usSampleCount = 0;        // l.28 : 0 = moyenne pas encore amorcée
+    var lastUsMeasureMs = 0;      // l.201 : 0 → 1re mesure à t = 200 ms
+    var usFailStreak = 0;         // l.202
+    var usAvg = 0.0;              // l.38 : la moyenne EST la distance lissée
+    var usSampleCount = 0;        // l.40 : 0 = moyenne pas encore amorcée
     var actif = true;             // false = capteur absent / ECHO débranché
 
-    // ── État du balayage de tête (head.cpp l.33-37) : FLOAT, comme le
+    // ── État du balayage de tête (head.cpp l.45-49) : FLOAT, comme le
     //    firmware (un int tronquerait l'incrément fractionnaire à 0). ──
     var panPos = PAN_CENTRE, tiltPos = TILT_CENTRE;
-    var panDir = 1, tiltDir = 1;                    // l.36-37
-    var headPanDeg = 90, headTiltDeg = 60;          // l.91-92 (arrondi publié)
+    var panDir = 1, tiltDir = 1;                    // l.48-49
+    var headPanDeg = 90, headTiltDeg = 60;          // l.186-187 (arrondi publié)
 
-    var obstacleSeenAngle = -1;                     // l.42
+    var obstacleSeenAngle = -1;                     // l.55
     var equilibreCourant = true;                    // g_state.balancing
 
+    // ── État de l'évitement (head.cpp l.70-73) ──
+    var avoidPhase = AV_LIBRE;                      // l.71
+    var avoidSinceMs = 0;                           // l.72 : entrée dans RECUL
+    var avoidSide = 0;                              // l.73 : côté verrouillé (−1 / +1)
+
     // ── Vue publique (réécrite à chaque tick ; les champs reflètent
-    //    g_state.obstacleCm / obstacleWarn de head.cpp) ──
+    //    g_state.obstacle* / avoid* de head.cpp) ──
     var state = {
       tMs: 0,                    // horloge simulée (ms entières)
-      obstacleCm: -1,            // g_state.obstacleCm (l.147/162/174)
-      obstacleWarn: false,       // g_state.obstacleWarn (l.148/163)
-      angleVu: -1,               // obstacleSeenAngle (l.42/149/166-169)
-      failStreak: 0,             // échecs consécutifs (l.107)
-      cadenceMs: INTERVAL_NORMALE_MS,  // intervalle courant (l.108)
+      obstacleCm: -1,            // g_state.obstacleCm (l.245/262/277)
+      obstacleWarn: false,       // g_state.obstacleWarn (l.246/263) : < US_STOP_CM
+      obstacleSlow: false,       // g_state.obstacleSlow (l.247/264) : US_STOP_CM ≤ d < US_SLOW_CM
+      obstacleSide: 0,           // g_state.obstacleSide (l.248/273) : −1 pan<90, +1 pan>90, 0 en face/inconnu
+      angleVu: -1,               // obstacleSeenAngle (l.55/249/268-272)
+      avoidFwdMax: 100,          // g_state.avoidFwdMax (l.86) : 100 libre · 40 ralenti · 0 stop · <0 recul imposé
+      avoidTurn: 0,              // g_state.avoidTurn (l.87) : pivot imposé si l'UI ne tourne pas
+      avoidPhase: AV_LIBRE,      // g_state.avoidPhase (l.88) : 0 libre · 1 ralenti · 2 recul+pivot · 3 pivot seul
+      failStreak: 0,             // échecs consécutifs (l.202)
+      cadenceMs: INTERVAL_NORMALE_MS,  // intervalle courant (l.203)
       nbMesures: 0,              // mesures tentées depuis le reset
       derniereMesureMs: 0,       // horodatage de la dernière tentative
       mesureFaite: false,        // true le tick où une mesure a eu lieu
       actif: true,
-      headPanDeg: 90,            // g_state.headPanDeg (l.208)
-      headTiltDeg: 60            // g_state.headTiltDeg (l.209)
+      headPanDeg: 90,            // g_state.headPanDeg (l.324)
+      headTiltDeg: 60            // g_state.headTiltDeg (l.325)
     };
 
     function constrain(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-    // ── measureUltrasonic() (head.cpp l.122-178) ─────────────────────
+    // ── sideFromPan() (head.cpp l.78-83) : côté de l'obstacle d'après
+    //    l'angle de tête. Le sens mécanique n'est pas connu du firmware
+    //    (AVOID_TURN_SIGN le règle au premier essai réel). ──
+    function sideFromPan(panDeg) {
+      var d = panDeg - 90;
+      if (d >  AVOID_SIDE_DEAD_DEG) return +1;
+      if (d < -AVOID_SIDE_DEAD_DEG) return -1;
+      return 0;                                     // en face : côté par défaut
+    }
+
+    // ── publishAvoid() (head.cpp l.85-89) ──
+    function publishAvoid(fwdMax, turn) {
+      state.avoidFwdMax = fwdMax;
+      state.avoidTurn = turn;
+      state.avoidPhase = avoidPhase;
+    }
+
+    // ── updateAvoidance() (head.cpp l.91-137) : machine à états, 50 Hz
+    //    dans le firmware (avec la tête), à chaque tick de 5 ms ici — elle ne
+    //    change d'état qu'aux mesures (200 ms) et sur le compteur de recul
+    //    (1,5 s), la granularité est sans effet. ──
+    function updateAvoidance() {
+      // l.95-99 : uniquement quand le robot tient debout.
+      if (!equilibreCourant) {
+        avoidPhase = AV_LIBRE;
+        publishAvoid(100, 0);
+        return;
+      }
+      var now = tMs;                                // l.100 : millis()
+      var d = state.obstacleCm;                     // l.101 : −1 = pas d'écho
+      var seen = (d >= 0.0);                        // l.102
+
+      switch (avoidPhase) {                         // l.104-129
+        case AV_LIBRE:
+        case AV_RALENTI:
+          if (state.obstacleWarn) {                 // l.107 : d < US_STOP_CM
+            avoidPhase = AV_RECUL;
+            avoidSinceMs = now;
+            var side = (obstacleSeenAngle >= 0) ? sideFromPan(obstacleSeenAngle) : 0;
+            if (side === 0) side = AVOID_DEFAULT_SIDE;
+            // l.112-114 : obstacle vu à droite (+1) → pivoter à gauche : −side,
+            // au signe mécanique près.
+            avoidSide = -side * AVOID_TURN_SIGN;
+          } else if (state.obstacleSlow) {          // l.115
+            avoidPhase = AV_RALENTI;
+          } else {
+            avoidPhase = AV_LIBRE;
+          }
+          break;
+        case AV_RECUL:
+        case AV_PIVOT:
+          if (!seen || d > US_CLEAR_CM) {           // l.123 : passage dégagé (hystérésis)
+            avoidPhase = state.obstacleSlow ? AV_RALENTI : AV_LIBRE;
+          } else if (avoidPhase === AV_RECUL && now - avoidSinceMs >= AVOID_BACK_MAX_MS) {
+            avoidPhase = AV_PIVOT;                  // l.126 : on ne recule pas à l'infini
+          }
+          break;
+      }
+
+      switch (avoidPhase) {                         // l.131-136
+        case AV_LIBRE:   publishAvoid(100, 0); break;
+        case AV_RALENTI: publishAvoid(AVOID_SLOW_CMD, 0); break;
+        case AV_RECUL:   publishAvoid(-AVOID_BACK_CMD, avoidSide * AVOID_TURN_CMD); break;
+        case AV_PIVOT:   publishAvoid(0, avoidSide * AVOID_TURN_CMD); break;
+      }
+    }
+
+    // ── measureUltrasonic() (head.cpp l.220-281) ─────────────────────
     // distReelCm : distance RÉELLE capteur→obstacle calculée par le viewer
     // (−1 = rien devant). Retourne true si un écho a été reçu.
     function measureUltrasonic(distReelCm) {
       // pulseIn(ECHO, HIGH, ECHO_TIMEOUT_US) : le budget du timeout couvre
       // AUSSI l'attente du front montant (ECHO_DELAI_FRONT_US, voir en
       // tête) — l'écho revient si délai + durée aller-retour (dist × 58
-      // µs/cm) tient dans le timeout (l.134-135, wiring_pulse.c).
+      // µs/cm) tient dans le timeout (l.232-233, wiring_pulse.c).
       // Capteur débranché : ECHO ne monte jamais → timeout systématique.
       var dureeOk = actif && distReelCm >= 0 &&
                     distReelCm * 58.0 + ECHO_DELAI_FRONT_US <= ECHO_TIMEOUT_US;
 
-      // l.137-140 : distance = durée / 58 ; timeout → −1.
+      // l.235-238 : distance = durée / 58 ; timeout → −1.
       var distanceCm = dureeOk ? distReelCm : -1.0;
 
-      // l.146-151 : le timeout N'EST PAS injecté dans la moyenne — elle
+      // l.244-251 : le timeout N'EST PAS injecté dans la moyenne — elle
       // est gardée en l'état pour le prochain écho.
       if (distanceCm < 0.0) {
         state.obstacleCm = -1.0;
         state.obstacleWarn = false;
+        state.obstacleSlow = false;
+        state.obstacleSide = 0;
         obstacleSeenAngle = -1;
         return false;
       }
 
-      // l.155-157 : moyenne glissante exponentielle sur 5 échantillons,
+      // l.255-257 : moyenne glissante exponentielle sur 5 échantillons,
       // amorcée sur la première mesure.
       if (usSampleCount === 0) usAvg = distanceCm;
       else                     usAvg += (distanceCm - usAvg) / US_SMOOTH_COUNT;
       if (usSampleCount < US_SMOOTH_COUNT) usSampleCount++;
 
-      var smoothedDistance = usAvg;                 // l.159
+      var smoothedDistance = usAvg;                 // l.259
 
-      // l.162-163 : publication de l'état.
+      // l.262-264 : publication de l'état.
       state.obstacleCm = smoothedDistance;
       state.obstacleWarn = (smoothedDistance < US_STOP_CM);
+      state.obstacleSlow = (smoothedDistance >= US_STOP_CM && smoothedDistance < US_SLOW_CM);
 
-      // l.166-170 : angle où l'obstacle a été vu.
+      // l.266-273 : angle où l'obstacle a été vu (premier écho sous
+      // US_STOP_CM dans le balayage courant) → côté publié pour l'évitement.
       if (state.obstacleWarn) {
         if (obstacleSeenAngle < 0) obstacleSeenAngle = headPanDeg;
       } else {
         obstacleSeenAngle = -1;
       }
+      state.obstacleSide = (obstacleSeenAngle >= 0) ? sideFromPan(obstacleSeenAngle) : 0;
 
-      // l.173-175 : clamp à la portée utile (écho reçu mais trop loin :
+      // l.275-278 : clamp à la portée utile (écho reçu mais trop loin :
       // ce n'est PAS un échec, la cadence reste à 200 ms).
       if (smoothedDistance > US_MAX_CM) {
         state.obstacleCm = -1.0;                    // hors portée
@@ -1995,19 +2242,31 @@
       return true;
     }
 
-    // ── handleHeadMovement() (head.cpp l.181-217, sans l'écriture servo) ──
+    // ── handleHeadMovement() (head.cpp l.284-333, sans l'écriture servo) ──
     function handleHeadMovement(dt) {
-      if (dt <= 0.0) return;                        // l.187
-      if (dt > 0.1) dt = 0.1;                       // l.188
+      if (dt <= 0.0) return;                        // l.290
+      if (dt > 0.1) dt = 0.1;                       // l.291
 
       if (equilibreCourant) {
-        // l.190-195 : équilibre → tête ramenée au centre, vitesse bornée.
+        // l.293-311 : équilibre → tilt ramené au centre (vitesse bornée) ;
+        // pan en balayage ÉTROIT ±HEAD_BALANCE_SWEEP_DEG autour de 90°
+        // (0 = tête fixe, comportement d'avant 10044c0) — c'est ce balayage
+        // qui donne un CÔTÉ à l'obstacle pour l'évitement.
         var panStep = PAN_SPEED_DEG * dt;
         var tiltStep = TILT_SPEED_DEG * dt;
-        panPos += constrain(PAN_CENTRE - panPos, -panStep, panStep);
         tiltPos += constrain(TILT_CENTRE - tiltPos, -tiltStep, tiltStep);
+        var kLo = PAN_CENTRE - HEAD_BALANCE_SWEEP_DEG;
+        var kHi = PAN_CENTRE + HEAD_BALANCE_SWEEP_DEG;
+        if (HEAD_BALANCE_SWEEP_DEG <= 0 || panPos < kLo - panStep || panPos > kHi + panStep) {
+          // l.304-306 : hors de la fenêtre (on vient du balayage large) : retour au centre
+          panPos += constrain(PAN_CENTRE - panPos, -panStep, panStep);
+        } else {
+          panPos += PAN_SPEED_DEG * panDir * dt;    // l.308-310
+          if (panPos <= kLo)      { panPos = kLo; panDir = 1; }
+          else if (panPos >= kHi) { panPos = kHi; panDir = -1; }
+        }
       } else {
-        // l.196-205 : robot au sol → balayage continu pan puis tilt.
+        // l.312-321 : robot au sol → balayage continu pan puis tilt.
         panPos += PAN_SPEED_DEG * panDir * dt;
         if (panPos <= HEAD_PAN_MIN)      { panPos = HEAD_PAN_MIN; panDir = 1; }
         else if (panPos >= HEAD_PAN_MAX) { panPos = HEAD_PAN_MAX; panDir = -1; }
@@ -2017,19 +2276,19 @@
         else if (tiltPos >= HEAD_TILT_MAX) { tiltPos = HEAD_TILT_MAX; tiltDir = -1; }
       }
 
-      // l.208-209 : publication de l'arrondi.
+      // l.324-325 : publication de l'arrondi.
       headPanDeg = Math.round(panPos);
       headTiltDeg = Math.round(tiltPos);
     }
 
-    // ── UN pas de 5 ms : ordre de Head::loop() (l.101-117) : la mesure
-    //    d'abord, le balayage ensuite. ──
+    // ── UN pas de 5 ms : ordre de Head::loop() (l.196-215) : la mesure
+    //    d'abord, le balayage ensuite, l'évitement en dernier. ──
     function tick(distReelCm, enEquilibre) {
       tMs += DT_MS;
       equilibreCourant = !!enEquilibre;
       state.mesureFaite = false;
 
-      // l.106-113 : cadence ADAPTATIVE. 200 ms tant que l'écho revient ;
+      // l.201-208 : cadence ADAPTATIVE. 200 ms tant que l'écho revient ;
       // 1000 ms après 3 échecs consécutifs ; retour à 200 ms dès qu'un
       // écho revient (failStreak repart à 0).
       var interval = (usFailStreak >= 3) ? INTERVAL_ECHEC_MS : INTERVAL_NORMALE_MS;
@@ -2043,7 +2302,9 @@
         else                               usFailStreak++;
       }
 
-      handleHeadMovement(DT_MS / 1000.0);
+      handleHeadMovement(DT_MS / 1000.0);           // l.211
+
+      updateAvoidance();                            // l.214
 
       // Recopie de l'état interne dans la vue publique.
       state.tMs = tMs;
@@ -2061,8 +2322,9 @@
 
     function setActif(b) { actif = !!b; }
 
-    // ── reset() : Head::begin() (l.84-95) — lissage et balayage remis à
-    //    zéro, horloge repartie (le viewer le couple au reset du moteur). ──
+    // ── reset() : Head::begin() (l.179-191) — lissage et balayage remis à
+    //    zéro, horloge repartie (le viewer le couple au reset du moteur) ;
+    //    l'évitement repart LIBRE comme au boot. ──
     function reset() {
       tMs = 0;
       lastUsMeasureMs = 0;
@@ -2073,10 +2335,16 @@
       panDir = 1; tiltDir = 1;
       headPanDeg = 90; headTiltDeg = 60;
       obstacleSeenAngle = -1;
+      avoidPhase = AV_LIBRE; avoidSinceMs = 0; avoidSide = 0;
       state.tMs = 0;
       state.obstacleCm = -1.0;
       state.obstacleWarn = false;
+      state.obstacleSlow = false;
+      state.obstacleSide = 0;
       state.angleVu = -1;
+      state.avoidFwdMax = 100;
+      state.avoidTurn = 0;
+      state.avoidPhase = AV_LIBRE;
       state.failStreak = 0;
       state.cadenceMs = INTERVAL_NORMALE_MS;
       state.nbMesures = 0;
@@ -2101,6 +2369,8 @@
     constants: Object.freeze({
       US_MAX_CM: US_MAX_CM,
       US_STOP_CM: US_STOP_CM,
+      US_SLOW_CM: US_SLOW_CM,
+      US_CLEAR_CM: US_CLEAR_CM,
       US_SMOOTH_COUNT: US_SMOOTH_COUNT,
       ECHO_TIMEOUT_US: ECHO_TIMEOUT_US,
       ECHO_DELAI_FRONT_US: ECHO_DELAI_FRONT_US,
@@ -2108,7 +2378,13 @@
       INTERVAL_ECHEC_MS: INTERVAL_ECHEC_MS,
       HEAD_PAN_MIN: HEAD_PAN_MIN, HEAD_PAN_MAX: HEAD_PAN_MAX,
       HEAD_TILT_MIN: HEAD_TILT_MIN, HEAD_TILT_MAX: HEAD_TILT_MAX,
+      HEAD_BALANCE_SWEEP_DEG: HEAD_BALANCE_SWEEP_DEG,
       PAN_SPEED_DEG: PAN_SPEED_DEG, TILT_SPEED_DEG: TILT_SPEED_DEG,
+      AVOID_SLOW_CMD: AVOID_SLOW_CMD, AVOID_BACK_CMD: AVOID_BACK_CMD,
+      AVOID_BACK_MAX_MS: AVOID_BACK_MAX_MS, AVOID_TURN_CMD: AVOID_TURN_CMD,
+      AVOID_TURN_SIGN: AVOID_TURN_SIGN, AVOID_SIDE_DEAD_DEG: AVOID_SIDE_DEAD_DEG,
+      AVOID_DEFAULT_SIDE: AVOID_DEFAULT_SIDE,
+      AV_LIBRE: AV_LIBRE, AV_RALENTI: AV_RALENTI, AV_RECUL: AV_RECUL, AV_PIVOT: AV_PIVOT,
       DT_MS: DT_MS
     })
   });
@@ -2182,7 +2458,11 @@ window.BALANCEBOT_PARTS = {
        roues  .rotation.z = −(θ + φ)(rad)   (spin des roues, φ = angle servo)
    - Roulement sans glissement (cohérent avec le Lagrange du contrat) :
        x_centre = R · (θ + φ)   (R = 41,5 mm = rayon de roulement WHEEL_R)
-   - θ et φ viennent STRICTEMENT de sim.state (degrés → radians ici). */
+     à lacet nul ; avec le lacet ψ (couche déplacement du moteur : différentiel
+     des roues sur la voie), la pose au sol est intégrée par le moteur
+     (state.posX / posZ, m) et le robot tourne de −ψ autour de +Y (ψ > 0 =
+     vers la droite, +Z). Les deux roues tournent de φ ± φ_diff.
+   - θ, φ, φ_diff, ψ, posX, posZ viennent STRICTEMENT de sim.state. */
 (function () {
   "use strict";
 
@@ -2348,6 +2628,7 @@ window.BALANCEBOT_PARTS = {
         champs.noise.val.textContent = (+sc.noise).toFixed(2);
         sim.reset(sc);
         us.reset();              // le capteur repart comme le robot
+        pousseEvitement();       // … et l'évitement repart LIBRE
         // Le slider vient d'être aligné sur sc.noise : pousseReglages() propage tout.
         pousseReglages();
         accumulateur = 0;
@@ -2374,6 +2655,7 @@ window.BALANCEBOT_PARTS = {
   document.getElementById("btn-reset").addEventListener("click", function () {
     sim.reset(scenarioCourant);
     us.reset();                    // Head::begin() : lissage + balayage à zéro
+    pousseEvitement();             // évitement LIBRE
     accumulateur = 0;
     enMarche = false;
     majBoutons();
@@ -2452,6 +2734,48 @@ window.BALANCEBOT_PARTS = {
     us.setActif(rgCapteur.checked);
     vCapteur.textContent = rgCapteur.checked ? "ECHO câblé" : "débranché";
   });
+
+  // ======================================================================
+  // Panneau « Déplacement » : les flèches de l'UI du robot (g_state.cmdForward
+  // / cmdTurn, ±100). Poussées au moteur par setBotState, comme l'UI écrit
+  // g_state ; l'évitement (ultrason.js) y est poussé à chaque pas (boucle).
+  // ======================================================================
+  var rgAvancer = document.getElementById("rg-avancer");
+  var rgTourner = document.getElementById("rg-tourner");
+  var vAvancer = document.getElementById("v-avancer");
+  var vTourner = document.getElementById("v-tourner");
+  function pousseDeplacement() {
+    vAvancer.textContent = rgAvancer.value;
+    vTourner.textContent = rgTourner.value;
+    sim.setBotState({ cmdForward: +rgAvancer.value, cmdTurn: +rgTourner.value });
+  }
+  rgAvancer.addEventListener("input", pousseDeplacement);
+  rgTourner.addEventListener("input", pousseDeplacement);
+  document.getElementById("btn-dep-stop").addEventListener("click", function () {
+    rgAvancer.value = 0; rgTourner.value = 0;
+    pousseDeplacement();
+  });
+  // Démo : consignes nulles, plaque à 25 cm (la sonde la voit à ~20 cm), RESET
+  // puis RUN → recul + pivot dès la première mesure (t = 0,2 s).
+  document.getElementById("btn-dep-demo").addEventListener("click", function () {
+    rgAvancer.value = 0; rgTourner.value = 0;
+    pousseDeplacement();
+    rgDistance.value = 25;
+    rgDistance.dispatchEvent(new Event("input"));
+    sim.reset(scenarioCourant);
+    us.reset();
+    pousseEvitement();
+    accumulateur = 0;
+    enMarche = true;
+    majBoutons();
+  });
+
+  // Recopie de ce que head.cpp publie dans g_state vers ce que balance.cpp
+  // lit : avoidFwdMax / avoidTurn / obstacleWarn.
+  function pousseEvitement() {
+    var u = us.state;
+    sim.setBotState({ avoidFwdMax: u.avoidFwdMax, avoidTurn: u.avoidTurn, obstacleWarn: u.obstacleWarn });
+  }
 
   // ======================================================================
   // Scène 3D (Three.js). Échelle : 1 unité = 1 m. Voir repère en tête de fichier.
@@ -2563,15 +2887,19 @@ window.BALANCEBOT_PARTS = {
   var groupeCorps = new THREE.Group();   // pivote de θ (les 2 coques ₿)
   groupeCorps.add(meshPiece("b_front", matCoque));
   groupeCorps.add(meshPiece("b_back", matCoque));
-  var groupePieds = new THREE.Group();   // pivote de θ+φ (roues ₿ + bandes TPU)
-  groupePieds.add(meshPiece("roue_D", matRoue));
-  groupePieds.add(meshPiece("roue_G", matRoue));
-  groupePieds.add(meshPiece("pneu_D", matTPU));
-  groupePieds.add(meshPiece("pneu_G", matTPU));
+  // Une roue par groupe : elles tournent de θ+φ±φ_diff (différentiel de
+  // rotation → lacet), la gauche (−Z) = « out + turn » du firmware.
+  var groupeRoueG = new THREE.Group();
+  groupeRoueG.add(meshPiece("roue_G", matRoue));
+  groupeRoueG.add(meshPiece("pneu_G", matTPU));
+  var groupeRoueD = new THREE.Group();
+  groupeRoueD.add(meshPiece("roue_D", matRoue));
+  groupeRoueD.add(meshPiece("pneu_D", matTPU));
 
   var robot = new THREE.Group();
   robot.add(groupeCorps);
-  robot.add(groupePieds);
+  robot.add(groupeRoueG);
+  robot.add(groupeRoueD);
   robot.position.y = R;                  // axe des roues à hauteur R du sol
   scene.add(robot);
 
@@ -2652,8 +2980,9 @@ window.BALANCEBOT_PARTS = {
   //      fixe sa position au RESET du robot (x = 0 = axe des roues) ; la
   //      distance MESURÉE est recalculée depuis la sonde (pose physique). ----
   var OBSTACLE_EP = 0.01;                     // épaisseur 10 mm
+  var OBSTACLE_LARG = 0.10;                   // largeur 100 mm (axe Z)
   var obstacle = new THREE.Mesh(
-    new THREE.BoxGeometry(OBSTACLE_EP, 0.14, 0.10),
+    new THREE.BoxGeometry(OBSTACLE_EP, 0.14, OBSTACLE_LARG),
     new THREE.MeshStandardMaterial({ color: 0x8a919c, metalness: 0.1, roughness: 0.8 })
   );
   obstacle.castShadow = true;
@@ -2674,16 +3003,39 @@ window.BALANCEBOT_PARTS = {
   // ajoutés à groupeCorps APRÈS la pose physique dans majScene() — ils sont
   // cosmétiques et ne doivent pas toucher la mesure, exactement comme sur
   // le robot réel où le HC-SR04 ne connaît que θ et le roulement.
-  // Pose monde de la sonde (repère de l'en-tête) :
-  //   x = R·(θ+φ) + SONDE_X·cos θ + SONDE_Y·sin θ,   z = 0 (pas de lacet
-  //   physique — seul le tangage θ et le roulement R·(θ+φ) existent).
+  // Pose monde de la sonde (repère de l'en-tête) : l'avancée dans le plan du
+  // corps f = SONDE_X·cos θ + SONDE_Y·sin θ, tournée du lacet ψ autour de
+  // l'axe des roues (posX, posZ) intégré par le moteur :
+  //   x = posX + f·cos ψ,   z = posZ + f·sin ψ.
+  // GÉOMÉTRIE DU CAPTEUR ≠ GÉOMÉTRIE DU DÉCOR : la plaque fait 10 cm de large
+  // et le HC-SR04 n'est pas un rayon mais un LOBE (« measuring angle 15° »
+  // du datasheet → demi-angle LOBE_DEMI_ANGLE_DEG). On cherche le point de
+  // la face avant (segment z ∈ ±5 cm) le plus proche de la sonde À
+  // L'INTÉRIEUR du lobe : c'est le premier écho. Rien dans le lobe → −1.
+  // À ψ = 0 (pas de pivot) on retrouve exactement dx = x_face − x_sonde.
+  // Ni la hauteur (mesure horizontale) ni le tangage de la sonde ne
+  // comptent : l'écho revient de la face verticale, comme avant.
+  // Le pan de la tête NE tourne PAS le faisceau : sur le châssis v3 le
+  // capteur est fixé au corps (ROADMAP 4.4 : la tête pan/tilt n'existe pas).
+  var LOBE_DEMI_ANGLE_DEG = 15;
   function distanceReelleCm() {
-    var th = sim.state.theta * DEG;
-    var xSonde = R * (th + sim.state.phi * DEG) +
-                 SONDE_X * Math.cos(th) + SONDE_Y * Math.sin(th);
+    var st = sim.state;
+    var th = st.theta * DEG, psi = st.psi * DEG;
+    var f = SONDE_X * Math.cos(th) + SONDE_Y * Math.sin(th);
+    var cPsi = Math.cos(psi), sPsi = Math.sin(psi);
+    var xSonde = st.posX + f * cPsi, zSonde = st.posZ + f * sPsi;
     var dx = (obstacle.position.x - OBSTACLE_EP / 2) - xSonde;
-    if (dx < 0) return -1;
-    return dx * 100;                            // m → cm (z sonde = z obstacle = 0)
+    if (dx <= 0 || cPsi <= 0) return -1;        // plaque derrière la sonde, ou dos tourné
+    // Bords du lobe sur la face (x = x_face) : z = z_sonde + dx·tan(ψ ± α).
+    // Un bord qui regarde vers l'arrière (cos ≤ 0) ne borne plus de ce côté.
+    var a = LOBE_DEMI_ANGLE_DEG * DEG, zLo = -Infinity, zHi = Infinity;
+    if (Math.cos(psi - a) > 0) zLo = zSonde + dx * Math.tan(psi - a);
+    if (Math.cos(psi + a) > 0) zHi = zSonde + dx * Math.tan(psi + a);
+    zLo = Math.max(zLo, -OBSTACLE_LARG / 2);
+    zHi = Math.min(zHi,  OBSTACLE_LARG / 2);
+    if (zLo > zHi) return -1;                   // la plaque est hors du lobe
+    var zStar = Math.min(Math.max(zSonde, zLo), zHi);   // point de la face le plus proche
+    return Math.hypot(dx, zStar - zSonde) * 100;        // m → cm
   }
 
   // ======================================================================
@@ -2955,11 +3307,15 @@ window.BALANCEBOT_PARTS = {
     var s = sim.state;
     var th = s.theta * DEG;
     var ph = s.phi * DEG;
+    var pd = s.phiDiff * DEG;
     var an = offsetsAnim();
     groupeCorps.rotation.z = -th + an.pitch;   // θ physique + offset cosmétique
     groupeCorps.rotation.y = an.lacet;         // lacet cosmétique uniquement
-    groupePieds.rotation.z = -(th + ph);       // spin des roues (roulement + servo φ)
-    robot.position.x = R * (th + ph);          // roulement sans glissement
+    groupeRoueG.rotation.z = -(th + ph + pd);  // spin des roues (roulement + servo φ ± différentiel)
+    groupeRoueD.rotation.z = -(th + ph - pd);
+    robot.position.x = s.posX;                 // pose au sol intégrée par le moteur
+    robot.position.z = s.posZ;                 //   (= R·(θ+φ) sur x tant que ψ = 0)
+    robot.rotation.y = -s.psi * DEG;           // lacet PHYSIQUE (différentiel des roues)
     robot.position.y = R + an.saut;            // rebond cosmétique uniquement
     visage.exprAnim = an.expr;
     visage.gazeAnim = an.gaze;
@@ -3044,11 +3400,22 @@ window.BALANCEBOT_PARTS = {
     cadence: document.getElementById("us-cadence"),
     echecs: document.getElementById("us-echecs"),
     tete: document.getElementById("us-tete"),
-    angle: document.getElementById("us-angle")
+    angle: document.getElementById("us-angle"),
+    phase: document.getElementById("us-phase"),
+    avoid: document.getElementById("us-avoid"),
+    effective: document.getElementById("dep-effective"),
+    lacet: document.getElementById("dep-lacet"),
+    pos: document.getElementById("dep-pos")
   };
+  var PHASES = [
+    { txt: "LIBRE",                          cls: "rien" },
+    { txt: "RALENTI (< 60 cm)",              cls: "ralenti" },
+    { txt: "RECUL + PIVOT (< 25 cm)",        cls: "alerte" },
+    { txt: "PIVOT seul (recul épuisé)",      cls: "alerte" }
+  ];
 
   function majTelemetrieUS() {
-    var u = us.state;
+    var u = us.state, s = sim.state;
     elUs.distance.textContent = u.obstacleCm >= 0 ? u.obstacleCm.toFixed(1) + " cm" : "—";
     if (!u.actif) {
       elUs.etat.textContent = "absent (ECHO débranché)";
@@ -3056,6 +3423,9 @@ window.BALANCEBOT_PARTS = {
     } else if (u.obstacleWarn) {
       elUs.etat.textContent = "ALERTE < 25 cm";
       elUs.etat.className = "alerte";
+    } else if (u.obstacleSlow) {
+      elUs.etat.textContent = "ralenti < 60 cm";
+      elUs.etat.className = "ralenti";
     } else if (u.obstacleCm >= 0) {
       elUs.etat.textContent = "obstacle";
       elUs.etat.className = "obstacle";
@@ -3066,7 +3436,17 @@ window.BALANCEBOT_PARTS = {
     elUs.cadence.textContent = u.cadenceMs + " ms";
     elUs.echecs.textContent = String(u.failStreak);
     elUs.tete.textContent = u.headPanDeg + "° / " + u.headTiltDeg + "°";
-    elUs.angle.textContent = u.angleVu >= 0 ? u.angleVu + "°" : "—";
+    elUs.angle.textContent = u.angleVu >= 0
+      ? u.angleVu + "° / " + (u.obstacleSide > 0 ? "+1 (pan > 100)" : u.obstacleSide < 0 ? "−1 (pan < 80)" : "0 (en face)")
+      : "—";
+    var ph = PHASES[u.avoidPhase] || PHASES[0];
+    elUs.phase.textContent = ph.txt;
+    elUs.phase.className = ph.cls;
+    elUs.avoid.textContent = "avance ≤ " + u.avoidFwdMax + (u.avoidTurn ? " · pivot " + (u.avoidTurn > 0 ? "+" : "") + u.avoidTurn : "");
+    elUs.effective.textContent = "avance " + s.fwdSmooth.toFixed(0) + " · tourne " + s.turnSmooth.toFixed(0) +
+                                 " (θ_ref " + s.setpoint.toFixed(2) + "°)";
+    elUs.lacet.textContent = s.psi.toFixed(1) + " °";
+    elUs.pos.textContent = "x " + (s.posX * 100).toFixed(1) + " · z " + (s.posZ * 100).toFixed(1) + " cm";
   }
 
   // ======================================================================
@@ -3087,10 +3467,16 @@ window.BALANCEBOT_PARTS = {
         // La distance est figée le temps du lot : le capteur échantillonne
         // au plus tous les 40 pas (200 ms), l'approximation est invisible.
         var dCm = distanceReelleCm();
-        sim.stepMany(n);
-        // Le capteur partage l'horloge du moteur (pas de 5 ms, 200 Hz) :
-        // ses mesures tombent aux mêmes instants que sur le robot réel.
-        us.tickMany(n, dCm, !sim.state.fallen);
+        // Pas par pas, dans l'ordre du firmware : la boucle d'équilibre
+        // avance (cœur 0), la tête mesure/balaie/décide (cœur 1) sur la
+        // même horloge de 5 ms, et ce qu'elle publie (avoidFwdMax,
+        // avoidTurn, obstacleWarn) est lu par le pas SUIVANT — c'est le
+        // couplage vérifié par selfcheck.js §8.
+        for (var i = 0; i < n && !sim.state.verdict; i++) {
+          sim.step();
+          us.tick(dCm, !sim.state.fallen);
+          pousseEvitement();
+        }
         pasComptes += n;
       }
     } else {

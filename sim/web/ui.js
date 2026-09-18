@@ -20,7 +20,11 @@
        roues  .rotation.z = −(θ + φ)(rad)   (spin des roues, φ = angle servo)
    - Roulement sans glissement (cohérent avec le Lagrange du contrat) :
        x_centre = R · (θ + φ)   (R = 41,5 mm = rayon de roulement WHEEL_R)
-   - θ et φ viennent STRICTEMENT de sim.state (degrés → radians ici). */
+     à lacet nul ; avec le lacet ψ (couche déplacement du moteur : différentiel
+     des roues sur la voie), la pose au sol est intégrée par le moteur
+     (state.posX / posZ, m) et le robot tourne de −ψ autour de +Y (ψ > 0 =
+     vers la droite, +Z). Les deux roues tournent de φ ± φ_diff.
+   - θ, φ, φ_diff, ψ, posX, posZ viennent STRICTEMENT de sim.state. */
 (function () {
   "use strict";
 
@@ -186,6 +190,7 @@
         champs.noise.val.textContent = (+sc.noise).toFixed(2);
         sim.reset(sc);
         us.reset();              // le capteur repart comme le robot
+        pousseEvitement();       // … et l'évitement repart LIBRE
         // Le slider vient d'être aligné sur sc.noise : pousseReglages() propage tout.
         pousseReglages();
         accumulateur = 0;
@@ -212,6 +217,7 @@
   document.getElementById("btn-reset").addEventListener("click", function () {
     sim.reset(scenarioCourant);
     us.reset();                    // Head::begin() : lissage + balayage à zéro
+    pousseEvitement();             // évitement LIBRE
     accumulateur = 0;
     enMarche = false;
     majBoutons();
@@ -290,6 +296,48 @@
     us.setActif(rgCapteur.checked);
     vCapteur.textContent = rgCapteur.checked ? "ECHO câblé" : "débranché";
   });
+
+  // ======================================================================
+  // Panneau « Déplacement » : les flèches de l'UI du robot (g_state.cmdForward
+  // / cmdTurn, ±100). Poussées au moteur par setBotState, comme l'UI écrit
+  // g_state ; l'évitement (ultrason.js) y est poussé à chaque pas (boucle).
+  // ======================================================================
+  var rgAvancer = document.getElementById("rg-avancer");
+  var rgTourner = document.getElementById("rg-tourner");
+  var vAvancer = document.getElementById("v-avancer");
+  var vTourner = document.getElementById("v-tourner");
+  function pousseDeplacement() {
+    vAvancer.textContent = rgAvancer.value;
+    vTourner.textContent = rgTourner.value;
+    sim.setBotState({ cmdForward: +rgAvancer.value, cmdTurn: +rgTourner.value });
+  }
+  rgAvancer.addEventListener("input", pousseDeplacement);
+  rgTourner.addEventListener("input", pousseDeplacement);
+  document.getElementById("btn-dep-stop").addEventListener("click", function () {
+    rgAvancer.value = 0; rgTourner.value = 0;
+    pousseDeplacement();
+  });
+  // Démo : consignes nulles, plaque à 25 cm (la sonde la voit à ~20 cm), RESET
+  // puis RUN → recul + pivot dès la première mesure (t = 0,2 s).
+  document.getElementById("btn-dep-demo").addEventListener("click", function () {
+    rgAvancer.value = 0; rgTourner.value = 0;
+    pousseDeplacement();
+    rgDistance.value = 25;
+    rgDistance.dispatchEvent(new Event("input"));
+    sim.reset(scenarioCourant);
+    us.reset();
+    pousseEvitement();
+    accumulateur = 0;
+    enMarche = true;
+    majBoutons();
+  });
+
+  // Recopie de ce que head.cpp publie dans g_state vers ce que balance.cpp
+  // lit : avoidFwdMax / avoidTurn / obstacleWarn.
+  function pousseEvitement() {
+    var u = us.state;
+    sim.setBotState({ avoidFwdMax: u.avoidFwdMax, avoidTurn: u.avoidTurn, obstacleWarn: u.obstacleWarn });
+  }
 
   // ======================================================================
   // Scène 3D (Three.js). Échelle : 1 unité = 1 m. Voir repère en tête de fichier.
@@ -401,15 +449,19 @@
   var groupeCorps = new THREE.Group();   // pivote de θ (les 2 coques ₿)
   groupeCorps.add(meshPiece("b_front", matCoque));
   groupeCorps.add(meshPiece("b_back", matCoque));
-  var groupePieds = new THREE.Group();   // pivote de θ+φ (roues ₿ + bandes TPU)
-  groupePieds.add(meshPiece("roue_D", matRoue));
-  groupePieds.add(meshPiece("roue_G", matRoue));
-  groupePieds.add(meshPiece("pneu_D", matTPU));
-  groupePieds.add(meshPiece("pneu_G", matTPU));
+  // Une roue par groupe : elles tournent de θ+φ±φ_diff (différentiel de
+  // rotation → lacet), la gauche (−Z) = « out + turn » du firmware.
+  var groupeRoueG = new THREE.Group();
+  groupeRoueG.add(meshPiece("roue_G", matRoue));
+  groupeRoueG.add(meshPiece("pneu_G", matTPU));
+  var groupeRoueD = new THREE.Group();
+  groupeRoueD.add(meshPiece("roue_D", matRoue));
+  groupeRoueD.add(meshPiece("pneu_D", matTPU));
 
   var robot = new THREE.Group();
   robot.add(groupeCorps);
-  robot.add(groupePieds);
+  robot.add(groupeRoueG);
+  robot.add(groupeRoueD);
   robot.position.y = R;                  // axe des roues à hauteur R du sol
   scene.add(robot);
 
@@ -490,8 +542,9 @@
   //      fixe sa position au RESET du robot (x = 0 = axe des roues) ; la
   //      distance MESURÉE est recalculée depuis la sonde (pose physique). ----
   var OBSTACLE_EP = 0.01;                     // épaisseur 10 mm
+  var OBSTACLE_LARG = 0.10;                   // largeur 100 mm (axe Z)
   var obstacle = new THREE.Mesh(
-    new THREE.BoxGeometry(OBSTACLE_EP, 0.14, 0.10),
+    new THREE.BoxGeometry(OBSTACLE_EP, 0.14, OBSTACLE_LARG),
     new THREE.MeshStandardMaterial({ color: 0x8a919c, metalness: 0.1, roughness: 0.8 })
   );
   obstacle.castShadow = true;
@@ -512,16 +565,39 @@
   // ajoutés à groupeCorps APRÈS la pose physique dans majScene() — ils sont
   // cosmétiques et ne doivent pas toucher la mesure, exactement comme sur
   // le robot réel où le HC-SR04 ne connaît que θ et le roulement.
-  // Pose monde de la sonde (repère de l'en-tête) :
-  //   x = R·(θ+φ) + SONDE_X·cos θ + SONDE_Y·sin θ,   z = 0 (pas de lacet
-  //   physique — seul le tangage θ et le roulement R·(θ+φ) existent).
+  // Pose monde de la sonde (repère de l'en-tête) : l'avancée dans le plan du
+  // corps f = SONDE_X·cos θ + SONDE_Y·sin θ, tournée du lacet ψ autour de
+  // l'axe des roues (posX, posZ) intégré par le moteur :
+  //   x = posX + f·cos ψ,   z = posZ + f·sin ψ.
+  // GÉOMÉTRIE DU CAPTEUR ≠ GÉOMÉTRIE DU DÉCOR : la plaque fait 10 cm de large
+  // et le HC-SR04 n'est pas un rayon mais un LOBE (« measuring angle 15° »
+  // du datasheet → demi-angle LOBE_DEMI_ANGLE_DEG). On cherche le point de
+  // la face avant (segment z ∈ ±5 cm) le plus proche de la sonde À
+  // L'INTÉRIEUR du lobe : c'est le premier écho. Rien dans le lobe → −1.
+  // À ψ = 0 (pas de pivot) on retrouve exactement dx = x_face − x_sonde.
+  // Ni la hauteur (mesure horizontale) ni le tangage de la sonde ne
+  // comptent : l'écho revient de la face verticale, comme avant.
+  // Le pan de la tête NE tourne PAS le faisceau : sur le châssis v3 le
+  // capteur est fixé au corps (ROADMAP 4.4 : la tête pan/tilt n'existe pas).
+  var LOBE_DEMI_ANGLE_DEG = 15;
   function distanceReelleCm() {
-    var th = sim.state.theta * DEG;
-    var xSonde = R * (th + sim.state.phi * DEG) +
-                 SONDE_X * Math.cos(th) + SONDE_Y * Math.sin(th);
+    var st = sim.state;
+    var th = st.theta * DEG, psi = st.psi * DEG;
+    var f = SONDE_X * Math.cos(th) + SONDE_Y * Math.sin(th);
+    var cPsi = Math.cos(psi), sPsi = Math.sin(psi);
+    var xSonde = st.posX + f * cPsi, zSonde = st.posZ + f * sPsi;
     var dx = (obstacle.position.x - OBSTACLE_EP / 2) - xSonde;
-    if (dx < 0) return -1;
-    return dx * 100;                            // m → cm (z sonde = z obstacle = 0)
+    if (dx <= 0 || cPsi <= 0) return -1;        // plaque derrière la sonde, ou dos tourné
+    // Bords du lobe sur la face (x = x_face) : z = z_sonde + dx·tan(ψ ± α).
+    // Un bord qui regarde vers l'arrière (cos ≤ 0) ne borne plus de ce côté.
+    var a = LOBE_DEMI_ANGLE_DEG * DEG, zLo = -Infinity, zHi = Infinity;
+    if (Math.cos(psi - a) > 0) zLo = zSonde + dx * Math.tan(psi - a);
+    if (Math.cos(psi + a) > 0) zHi = zSonde + dx * Math.tan(psi + a);
+    zLo = Math.max(zLo, -OBSTACLE_LARG / 2);
+    zHi = Math.min(zHi,  OBSTACLE_LARG / 2);
+    if (zLo > zHi) return -1;                   // la plaque est hors du lobe
+    var zStar = Math.min(Math.max(zSonde, zLo), zHi);   // point de la face le plus proche
+    return Math.hypot(dx, zStar - zSonde) * 100;        // m → cm
   }
 
   // ======================================================================
@@ -793,11 +869,15 @@
     var s = sim.state;
     var th = s.theta * DEG;
     var ph = s.phi * DEG;
+    var pd = s.phiDiff * DEG;
     var an = offsetsAnim();
     groupeCorps.rotation.z = -th + an.pitch;   // θ physique + offset cosmétique
     groupeCorps.rotation.y = an.lacet;         // lacet cosmétique uniquement
-    groupePieds.rotation.z = -(th + ph);       // spin des roues (roulement + servo φ)
-    robot.position.x = R * (th + ph);          // roulement sans glissement
+    groupeRoueG.rotation.z = -(th + ph + pd);  // spin des roues (roulement + servo φ ± différentiel)
+    groupeRoueD.rotation.z = -(th + ph - pd);
+    robot.position.x = s.posX;                 // pose au sol intégrée par le moteur
+    robot.position.z = s.posZ;                 //   (= R·(θ+φ) sur x tant que ψ = 0)
+    robot.rotation.y = -s.psi * DEG;           // lacet PHYSIQUE (différentiel des roues)
     robot.position.y = R + an.saut;            // rebond cosmétique uniquement
     visage.exprAnim = an.expr;
     visage.gazeAnim = an.gaze;
@@ -882,11 +962,22 @@
     cadence: document.getElementById("us-cadence"),
     echecs: document.getElementById("us-echecs"),
     tete: document.getElementById("us-tete"),
-    angle: document.getElementById("us-angle")
+    angle: document.getElementById("us-angle"),
+    phase: document.getElementById("us-phase"),
+    avoid: document.getElementById("us-avoid"),
+    effective: document.getElementById("dep-effective"),
+    lacet: document.getElementById("dep-lacet"),
+    pos: document.getElementById("dep-pos")
   };
+  var PHASES = [
+    { txt: "LIBRE",                          cls: "rien" },
+    { txt: "RALENTI (< 60 cm)",              cls: "ralenti" },
+    { txt: "RECUL + PIVOT (< 25 cm)",        cls: "alerte" },
+    { txt: "PIVOT seul (recul épuisé)",      cls: "alerte" }
+  ];
 
   function majTelemetrieUS() {
-    var u = us.state;
+    var u = us.state, s = sim.state;
     elUs.distance.textContent = u.obstacleCm >= 0 ? u.obstacleCm.toFixed(1) + " cm" : "—";
     if (!u.actif) {
       elUs.etat.textContent = "absent (ECHO débranché)";
@@ -894,6 +985,9 @@
     } else if (u.obstacleWarn) {
       elUs.etat.textContent = "ALERTE < 25 cm";
       elUs.etat.className = "alerte";
+    } else if (u.obstacleSlow) {
+      elUs.etat.textContent = "ralenti < 60 cm";
+      elUs.etat.className = "ralenti";
     } else if (u.obstacleCm >= 0) {
       elUs.etat.textContent = "obstacle";
       elUs.etat.className = "obstacle";
@@ -904,7 +998,17 @@
     elUs.cadence.textContent = u.cadenceMs + " ms";
     elUs.echecs.textContent = String(u.failStreak);
     elUs.tete.textContent = u.headPanDeg + "° / " + u.headTiltDeg + "°";
-    elUs.angle.textContent = u.angleVu >= 0 ? u.angleVu + "°" : "—";
+    elUs.angle.textContent = u.angleVu >= 0
+      ? u.angleVu + "° / " + (u.obstacleSide > 0 ? "+1 (pan > 100)" : u.obstacleSide < 0 ? "−1 (pan < 80)" : "0 (en face)")
+      : "—";
+    var ph = PHASES[u.avoidPhase] || PHASES[0];
+    elUs.phase.textContent = ph.txt;
+    elUs.phase.className = ph.cls;
+    elUs.avoid.textContent = "avance ≤ " + u.avoidFwdMax + (u.avoidTurn ? " · pivot " + (u.avoidTurn > 0 ? "+" : "") + u.avoidTurn : "");
+    elUs.effective.textContent = "avance " + s.fwdSmooth.toFixed(0) + " · tourne " + s.turnSmooth.toFixed(0) +
+                                 " (θ_ref " + s.setpoint.toFixed(2) + "°)";
+    elUs.lacet.textContent = s.psi.toFixed(1) + " °";
+    elUs.pos.textContent = "x " + (s.posX * 100).toFixed(1) + " · z " + (s.posZ * 100).toFixed(1) + " cm";
   }
 
   // ======================================================================
@@ -925,10 +1029,16 @@
         // La distance est figée le temps du lot : le capteur échantillonne
         // au plus tous les 40 pas (200 ms), l'approximation est invisible.
         var dCm = distanceReelleCm();
-        sim.stepMany(n);
-        // Le capteur partage l'horloge du moteur (pas de 5 ms, 200 Hz) :
-        // ses mesures tombent aux mêmes instants que sur le robot réel.
-        us.tickMany(n, dCm, !sim.state.fallen);
+        // Pas par pas, dans l'ordre du firmware : la boucle d'équilibre
+        // avance (cœur 0), la tête mesure/balaie/décide (cœur 1) sur la
+        // même horloge de 5 ms, et ce qu'elle publie (avoidFwdMax,
+        // avoidTurn, obstacleWarn) est lu par le pas SUIVANT — c'est le
+        // couplage vérifié par selfcheck.js §8.
+        for (var i = 0; i < n && !sim.state.verdict; i++) {
+          sim.step();
+          us.tick(dCm, !sim.state.fallen);
+          pousseEvitement();
+        }
         pasComptes += n;
       }
     } else {

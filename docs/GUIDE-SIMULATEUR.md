@@ -73,14 +73,61 @@ ses défauts :
   exactement ce qui arrive sur un vrai montage quand la ligne ECHO n'est pas branchée.
 - **Le faisceau** : 🟢 obstacle vu · 🔴 **alerte** (moins de 25 cm) · gris discret : rien
   dans la portée.
-- **Télémétrie** : distance lissée, état, **cadence de mesure** (200 ms ; elle passe à
-  **1 s après trois échecs consécutifs** — sur le vrai robot la mesure bloque le
-  processeur, on l'espace donc quand il n'y a rien à voir), échecs consécutifs, position de
-  la tête, et l'angle sous lequel l'obstacle a été vu.
+- **Télémétrie** : distance lissée, état (rien · obstacle · **ralenti < 60 cm** · **ALERTE
+  < 25 cm**), **cadence de mesure** (200 ms ; elle passe à **1 s après trois échecs
+  consécutifs** — sur le vrai robot la mesure bloque le processeur, on l'espace donc quand
+  il n'y a rien à voir), échecs consécutifs, position de la tête, l'angle sous lequel
+  l'obstacle a été vu et le **côté** qui en découle, la **phase d'évitement** et la
+  **consigne imposée** au déplacement.
+- **La tête** : robot au sol elle balaie tout son débattement (0…180° / 20…90°) ; **en
+  équilibre elle balaie ±30° autour du centre** (`HEAD_BALANCE_SWEEP_DEG`), tilt au centre —
+  c'est ce balayage qui donne un côté à l'obstacle. Elle n'est pas visible en 3D (le
+  châssis n'a pas de tête séparée) et, comme sur le châssis v3 où le HC-SR04 est fixé au
+  corps, **elle ne tourne pas le faisceau** : la mesure suit le corps, pas le pan.
 
-**Ce que le capteur ne fait pas** : le firmware ne réagit pas physiquement à un obstacle —
-il publie la distance et l'alerte, c'est tout. Le simulateur fait **pareil** : il ne freine
-pas le robot tout seul, ce serait inventer un comportement que le robot n'a pas.
+## 5 bis. L'évitement d'obstacle (miroir de `head.cpp` → `balance.cpp`)
+
+Depuis le firmware `10044c0`, le robot **réagit** à l'obstacle — et le simulateur fait la
+même chose, avec les mêmes constantes de `config.h`, **sans jamais toucher à l'équilibre** :
+l'évitement n'agit que sur les **consignes de déplacement** (les flèches de l'écran), avant
+leur lissage, jamais sur le PID ni sur les roues.
+
+| Phase | Condition | Consigne imposée |
+|---|---|---|
+| LIBRE | rien sous 60 cm | avance ≤ 100 (aucune) |
+| RALENTI | 25 ≤ distance < 60 cm (`US_SLOW_CM`) | avance plafonnée à **40** |
+| RECUL + PIVOT | distance < 25 cm (`US_STOP_CM`) | **recul à −20** (≈ −1,2° de consigne) et **pivot ±40** du côté libre |
+| PIVOT seul | recul épuisé (1,5 s, `AVOID_BACK_MAX_MS`), obstacle toujours là | avance 0, pivot conservé |
+| reprise | distance > 35 cm (`US_CLEAR_CM`, hystérésis) ou plus d'écho | retour LIBRE / RALENTI |
+
+Le **côté** : le pan de la tête à l'instant où l'obstacle est passé sous 25 cm (pan > 100°
+→ obstacle « à droite » (+1) → pivot à gauche (−40) ; pan < 80° → l'inverse ; entre les
+deux « en face » → côté par défaut). Il est **verrouillé** pour toute la manœuvre. Le sens
+mécanique n'est pas connu du firmware (`AVOID_TURN_SIGN`) : dans le simulateur, un pivot
+négatif tourne vers la gauche (−Z).
+
+**Le panneau « Déplacement »** reproduit les flèches de l'UI du robot (`cmdForward`,
+`cmdTurn`, ±100) : avancer = incliner la consigne d'angle de 0,06° par unité, tourner =
+différentiel de roues (0,30 par unité), les deux lissés à 200 unités/s — exactement
+`balance.cpp`. Le lacet ψ et la position au sol sont intégrés depuis la différence de
+vitesse des deux roues sur la voie (139 mm) : c'est une grandeur du **simulateur** (pour
+voir le pivot), le robot n'a ni cap ni odométrie.
+
+**Pour le voir** : bouton **`Démo évitement`** (consignes à 0, plaque à 25 cm, RUN). Dès la
+première mesure (0,2 s) le robot **recule et pivote** ; à 1,7 s il ne recule plus et pivote
+seul ; **à 1,9 s il tombe**. Ce n'est pas un bug du simulateur : avec le jeu de gains qui
+tient (Kv = 0) **rien ne borne la vitesse** — un recul à −20 est une accélération constante,
+et 1,5 s suffisent à saturer la roue (250 °/s), après quoi le pendule n'est plus tenu. Même
+chose pour toute consigne d'avance : le robot **accélère sans fin** puis chute (1 à 3 s
+selon la consigne). Le ralentissement à 60 cm se voit donc dans la consigne effective (60 →
+40, θ_ref 3,6° → 2,4°), pas dans une marche durable. C'est ce que dit le modèle du
+firmware actuel ; le robot réel a des servos plus rapides (la saturation viendrait plus
+tard), mais pas de boucle de vitesse non plus.
+
+**Géométrie** : la plaque fait 10 mm × 10 cm de large ; le capteur est un **lobe de ±15°**
+(datasheet HC-SR04), pas un rayon — la distance mesurée est celle du point de la face le
+plus proche à l'intérieur du lobe, donc la plaque reste vue pendant le pivot tant qu'elle
+n'en sort pas. Un rayon fin la perdrait à ~11° de lacet et écourterait la manœuvre.
 
 ## 6. Les animations
 
@@ -174,10 +221,12 @@ vaut :
   9,5 ms) ;
 - la mesure de distance est **horizontale** : un obstacle très bas ou très haut ne serait
   pas distingué ;
-- **pas de collision** : le robot peut traverser l'obstacle et rouler au-delà — le firmware
-  ne réagit pas à l'obstacle (il publie la distance et l'alerte, c'est tout), le simulateur
-  fait pareil. La distance devient simplement négative (−1, « pas d'écho ») une fois la
-  plaque dépassée ;
+- **pas de collision** : le firmware **réagit** à l'obstacle (recul, pivot — §5 bis), mais
+  si une consigne d'avance ou l'élan l'emporte, le robot peut traverser la plaque et rouler
+  au-delà, rien ne l'arrête physiquement. La distance devient simplement « pas d'écho »
+  (−1) une fois la plaque dépassée ;
+- **le lacet est cinématique** : le pivot vient de la différence de vitesse des roues, sans
+  inertie de lacet ni glissement, et le robot n'a ni cap ni odométrie réels pour le mesurer ;
 - après une chute, la simulation **s'arrête** (elle ne rejoue pas le robot à terre) ;
 - les frottements, le jeu mécanique, la souplesse des servos et l'usure **ne sont pas
   modélisés** : si le robot réel se comporte moins bien que la simulation, cherche d'abord
@@ -186,5 +235,5 @@ vaut :
 ---
 
 *Ce guide décrit le simulateur du dépôt. Si tu changes une constante du firmware
-(`balance-bot/config.h`), répercute-la ici **et** dans `sim/web/ultrason.js` : c'est la
-règle d'or.*
+(`balance-bot/config.h`, `head.cpp`, `balance.cpp`), répercute-la ici **et** dans
+`sim/web/ultrason.js` / `sim/web/engine.js` / `sim/balancebot_sim.py` : c'est la règle d'or.*

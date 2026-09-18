@@ -37,7 +37,7 @@ Statuts : ✅ fait · 🔄 en cours · ⏳ à faire · 🔧 demande le robot ou 
 
 | # | Chantier | État | Détail |
 |---|---|---|---|
-| 3.1 | **Évitement d'obstacle** | 🔄 | Le firmware calcule déjà l'angle où l'obstacle a été vu et ne s'en sert jamais. Réaction par la consigne de dérive, **jamais** en coupant l'équilibre. Miroir dans le simulateur ensuite. |
+| 3.1 | **Évitement d'obstacle** | ✅ 🔧 | Firmware (`10044c0`) : ralenti < 60 cm, recul doux + pivot du côté libre < 25 cm, pivot seul après 1,5 s, hystérésis 35 cm, tête qui balaie ±30° en équilibre — par les consignes seulement, **jamais** en coupant l'équilibre. Miroir dans les deux simulateurs (couche déplacement + évitement, auto-test §6-8, bouton « Démo évitement »). Le simulateur prévient : sans boucle de vitesse, recul et avance sont des accélérations constantes → chute à la saturation des roues ; à confirmer sur le robot. |
 | 3.2 | **« Suis-moi »** | ⏳ | Un correcteur simple sur la distance : garder ~50 cm. |
 | 3.3 | **Pilotage au téléphone** | ⏳ | Une page de conduite tactile dans le point d'accès `BalanceBot-Tune` qui existe déjà. |
 | 3.4 | **Animations portées sur le robot** | ⏳ 🔧 | Les 5 animations du simulateur, exécutées par les servos réels + le visage. |
