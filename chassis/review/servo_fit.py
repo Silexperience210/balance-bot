@@ -25,8 +25,9 @@ sys.path.insert(0, HERE)
 import sg90_model as SG  # noqa: E402
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-STLDIR = argv[0] if argv else os.path.join(HERE, '..', 'v3')
-CLR = float(argv[1]) if len(argv) > 1 else 0.0   # jeu de montage ajouté au servo
+args = [a for a in argv if not a.startswith('--')]
+STLDIR = args[0] if args else os.path.join(HERE, '..', 'v3')
+CLR = float(args[1]) if len(args) > 1 else 0.0   # jeu de montage ajouté au servo
 
 # ── constantes reprises telles quelles de gen_bitcoin_bot.py ────────────────
 GW, GH, Z0 = 118.0, 165.0, 26.0

@@ -128,8 +128,12 @@ def sg90_parts(tab=0.0, cable_len=12.0, with_shaft=True, cable='both', hump=Fals
     # NON coté au datasheet et la CAO de référence est par ailleurs sous-cotée : variante
     # pessimiste, désactivée par défaut, à activer pour vérifier un servo qui la présente.
     if hump:
-        parts.append(_boite('hump', -SG_BOSS_H, 0.5, -SG_BOSS_D / 2, SG_BOSS_D / 2,
-                            SG_SHAFT_OFF, SG_SHAFT_OFF + SG_BOSS_D / 2 + SG_HUMP_OVER))
+        # Capot mesuré sur Servo-SG90.stl : 4,0 mm de haut (le bossage
+        # datasheet de 1,5 mm est à l'intérieur), de (arbre − rayon) jusqu'à
+        # (arbre + rayon + débord 2,9 mm).
+        parts.append(_boite('hump', -SG_HUMP_H, 0.4, -SG_BOSS_D / 2, SG_BOSS_D / 2,
+                            SG_SHAFT_OFF - SG_BOSS_D / 2,
+                            SG_SHAFT_OFF + SG_BOSS_D / 2 + SG_HUMP_OVER))
     if with_shaft:
         parts.append(_cyl_x('arbre', SG_SHAFT_D, -SG_BOSS_H - SG_SHAFT_PROJ, -SG_BOSS_H + 0.2,
                             0.0, SG_SHAFT_OFF))
