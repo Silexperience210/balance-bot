@@ -50,7 +50,9 @@ Les deux tubes ont la même longueur (12,13 mm au-delà de la peau). Une seule
 roue s'imprime. Le milieu des axes, avant miroir, est à 53,4 mm ; le centre
 du glyphe est à 59 mm. Écart −5,6 mm vers le spine. Recentrer demanderait
 deux moyeux différents ou de toucher l'enveloppe : ce n'est pas fait.
-L'ancien commentaire « −11 mm » décrivait mal `TUBE` (12,1 mm). Après miroir,
+L'ancien commentaire « −11 mm » décrivait mal `TUBE` (12,1 mm). Une
+option pour annuler l'écart, **non appliquée**, est dans
+`chassis/RECENTRAGE.md` (deux moyeux, palier spine plus court). Après miroir,
 les faces externes des roues sont à x = −10,50 et 139,63 mm (entraxe 150,1 mm,
 milieu 64,56 mm).
 

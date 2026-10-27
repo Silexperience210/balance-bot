@@ -10,7 +10,7 @@ namespace Ui {
   // Initialisation écran + touch. Retourne true si OK.
   bool  begin();
 
-  // Diagnostic du repère tactile (TOUCH_REVIEW.md §4). Dernier point
+  // Diagnostic du repère tactile (docs/revues/TOUCH_REVIEW.md §4). Dernier point
   // VALIDE, rémanent après relâchement : brut (sortie TouchLib, donc déjà
   // transposé par son setRotation(1)) et transformé (repère écran
   // 320×170). seq = numéro du tap, incrémenté à chaque front montant.

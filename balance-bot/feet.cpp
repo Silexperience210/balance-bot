@@ -65,6 +65,11 @@ constexpr float kTrimDegR = 0.0f;
 // l'inversion du gauche.
 constexpr float kDirL = -1.0f;
 constexpr float kDirR = +1.0f;
+// Montage en miroir (le générateur retourne un servo par rapport à
+// l'autre). Les signes DOIVENT être opposés. Ce n'est pas un essai au
+// sol : si une roue part du mauvais côté au premier banc, on inverse
+// UN de ces deux signes, pas la CAO. Voir docs/MONTAGE.md.
+static_assert(kDirL * kDirR < 0.0f, "servos de roue en miroir : signes opposés");
 
 // ── Bornes de sécurité ─────────────────────────────────────────────
 constexpr float kFootHardDeg = FOOT_HARD_DEG;  // butée dure — SOURCE : config.h

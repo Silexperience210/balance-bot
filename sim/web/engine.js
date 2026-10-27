@@ -424,7 +424,7 @@
 
       // boucle INTERNE (200 Hz) : contribution à θ_ref. SIGNE (−), aligné sur
       // balance.cpp recenterSetpoint() : −kRecenterKv·(v_cible − φ̇). Non
-      // tranché en réel (REVIEW_CLAUDE.md M1) — ne se change qu'avec le
+      // tranché en réel (docs/revues/REVIEW_CLAUDE.md M1) — ne se change qu'avec le
       // firmware ET le Python, jamais ici seul.
       var ref = 0.0;
       if (cascade) {
@@ -446,7 +446,7 @@
       }
       var out = Math.max(-OUT_MAX, Math.min(OUT_MAX, p + integ + d));
       // soft clamp de butée (feet.cpp fournit φ intégré = phi_cmd).
-      // SIGNE (REVIEW_CLAUDE.md M2) : `out` est la sortie PID NON inversée ;
+      // SIGNE (docs/revues/REVIEW_CLAUDE.md M2) : `out` est la sortie PID NON inversée ;
       // la vitesse de pied réelle est u = −out. Le pied pousse vers la butée
       // quand u·φ > 0 ⇔ (−out)·φ > 0.
       if (MODE === "arc" && (-out) * phiCmd > 0) {

@@ -90,6 +90,12 @@
 
 // ── Constantes robot ───────────────────────────────────────────────
 #define BALANCE_LOOP_HZ 200    // fréquence de la boucle d'équilibre
+// Rayon MONTÉ du châssis, en mm : chassis/cotes.py AXLE_Z (fond de gorge
+// + épaisseur du pneu). La boucle d'équilibre commande des °/s de roue,
+// elle ne multiplie PAS par ce rayon. Le modèle dynamique du simulateur
+// reste à 41,5 mm (rayon du pneu non étiré) : selfcheck.js est figé
+// dessus. Cette constante sert à la doc et à la CI, pas au PID.
+#define WHEEL_RADIUS_MM 42.0f
 // Butée DURE du pied en arc (°) — SOURCE UNIQUE, active seulement si
 // FOOT_TRAVEL_LIMITED. feet.cpp l'applique (clamp de φ + coupure explicite
 // de la commande) et balance.cpp s'en sert pour le soft clamp qui s'ouvre

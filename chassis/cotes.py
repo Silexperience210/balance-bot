@@ -268,6 +268,31 @@ def ecran_viewer():
             (lcx - milieu) / 1000.0)
 
 
+def proposition_recentrage():
+    """Option NON APPLIQUÉE : amener le milieu des axes sur le centre du glyphe.
+
+    Les peaux ne bougent pas. On allonge le tube de la panse de ``delta``
+    et on raccourcit celui du spine de la même quantité : la voie des
+    pneus ne change pas, le milieu se déplace de ``delta``. Deux longueurs
+    de moyeu, donc deux STL de roue. Le générateur ne lit pas ce dict.
+
+    ``delta`` est la moitié de l'écart actuel (milieu des peaux → GW/2),
+    parce que les deux tubes bougent en sens inverse.
+    """
+    _mil, dec = milieu_axes()
+    delta = -dec                         # mm, vers la panse, avant miroir
+    return dict(
+        applique=False,
+        delta_mm=delta,
+        tube_panse_mm=TUBE_LEN + delta,
+        tube_spine_mm=TUBE_LEN - delta,
+        moyeu_panse_mm=HUB_L + delta,
+        moyeu_spine_mm=HUB_L - delta,
+        engagement_spine_mm=(PILE["u_mouth"] - HUB_TIP_U) - delta,
+        ecart_actuel_mm=dec,
+    )
+
+
 def resume():
     """Texte court pour les journaux de génération."""
     g, d, mid, ent = roues_apres_miroir()
@@ -295,3 +320,8 @@ if __name__ == "__main__":
     print("  fond empreinte u   %8.3f" % POCKET_FLOOR_U)
     print("  engagement arbre   %8.3f (cas capot, datasheet 6,0 mm)" % (SHAFT_TIP_U - HORN_ON_CAP))
     print("  dalle viewer       %s" % (tuple(round(x, 6) for x in ecran_viewer()),))
+    p = proposition_recentrage()
+    print("  recentrage         NON APPLIQUÉ  delta=%+.2f mm  "
+          "tubes panse/spine %.2f / %.2f  moyeux %.2f / %.2f"
+          % (p["delta_mm"], p["tube_panse_mm"], p["tube_spine_mm"],
+             p["moyeu_panse_mm"], p["moyeu_spine_mm"]))

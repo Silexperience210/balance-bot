@@ -77,7 +77,7 @@ void stopRadio() {
 }
 
 // Trace série de l'état de la radio. JAMAIS depuis loop() : une écriture
-// USB-CDC bloque quand l'hôte ne draine pas le port (STALL_ANALYSIS.md
+// USB-CDC bloque quand l'hôte ne draine pas le port (docs/revues/STALL_ANALYSIS.md
 // §6). Appelée depuis setup() via begin(), et depuis serverTask() après
 // chaque transition radio demandée par toggle() — REVIEW_CLAUDE M14.
 void announce() {
@@ -379,7 +379,7 @@ float argOrNan(const char* name) {
   return f;
 }
 
-// Diagnostic du repère tactile — TOUCH_REVIEW.md §4. Endpoint séparé (et non
+// Diagnostic du repère tactile — docs/revues/TOUCH_REVIEW.md §4. Endpoint séparé (et non
 // un ajout à /api/state) : le tampon de handleState est passé à 512 o pour
 // absorber les 19 champs de cadence (FINAL_REVIEW constat 1) ; garder ce
 // diagnostic ici évite de rapprocher les deux charges du même tampon.

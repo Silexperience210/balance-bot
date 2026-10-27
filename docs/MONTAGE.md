@@ -73,5 +73,12 @@ du dépôt.
 - `kUsPerDegS` (défaut 1,0) se cale en envoyant la pleine consigne et en
   regardant si l'impulsion reste dans ±500 µs. Ce n'est pas calculable
   depuis le dépôt.
+- Perte de l'IMU (plus de 100 ms sans trame), cadence sous 120 Hz, ou
+  boucle figée : le firmware **détache** le PWM des roues et refuse de
+  le rattacher tant que le robot n'est pas tenu à moins de 10° pendant
+  700 ms. C'est le même verrou que la chute. Ce n'est pas un essai : un
+  servo continu au neutre 1500 µs peut ramper, et `halt()` seul ne
+  suffisait pas. Le mode arc (compilation position) garde l'ancienne
+  reprise automatique.
 
 Lire `TEST_PROTOCOL.md` avant d'armer la boucle d'équilibre.

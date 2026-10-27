@@ -17,7 +17,7 @@ static const float ADC_FACTOR = 2.0f;   // pont diviseur 1/2
 static const float BAT_MIN_V = 3.0f;
 static const float BAT_MAX_V = 4.4f;
 
-// « Batterie faible » DÉBOUNCÉ + HYSTÉRÉTIQUE (REVIEW_CLAUDE.md M6). Une
+// « Batterie faible » DÉBOUNCÉ + HYSTÉRÉTIQUE (docs/revues/REVIEW_CLAUDE.md M6). Une
 // LiPo 1S à mi-charge (~3,7 V à vide) plonge transitoirement sous 3,5 V à
 // chaque pointe de courant des 4 SG90 (1-2 A, résistance interne + câblage
 // volant) : décidé sur UN échantillon par seconde, le drapeau basculait au

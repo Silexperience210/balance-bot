@@ -18,8 +18,10 @@
      En Three.js (rotation anti-horaire autour de +Z), cela donne :
        corps  .rotation.z = −θ(rad)
        roues  .rotation.z = −(θ + φ)(rad)   (spin des roues, φ = angle servo)
-   - Roulement sans glissement (cohérent avec le Lagrange du contrat) :
-       x_centre = R · (θ + φ)   (R = 41,5 mm = rayon de roulement WHEEL_R)
+   - Roulement sans glissement (cohérent avec le Lagrange du moteur) :
+       x_centre = R · (θ + φ)
+     R ici est le rayon DYNAMIQUE d'engine.js (41,5 mm, selfcheck figé).
+     La hauteur visuelle de l'axe est meta.rayonRoulement (42 mm, cotes.AXLE_Z).
      à lacet nul ; avec le lacet ψ (couche déplacement du moteur : différentiel
      des roues sur la voie), la pose au sol est intégrée par le moteur
      (state.posX / posZ, m) et le robot tourne de −ψ autour de +Y (ψ > 0 =
@@ -103,7 +105,7 @@
 
   // ── JEUX DE GAINS ────────────────────────────────────────────────────
   // `embarques` = ce qui est FLASHÉ dans le firmware : il TOMBE (0/6 scénarios
-  // mesurés) — c'est le constat de FIRMWARE_REVIEW.md §1bis, la raison même de
+  // mesurés) — c'est le constat de docs/revues/FIRMWARE_REVIEW.md §1bis, la raison même de
   // la campagne de réglage. `tient` = meilleur jeu trouvé au banc (5/6), la
   // cascade étant neutralisée (Kv = 0 : à Kv = 3 elle sature et fait tomber).
   var JEUX = {
@@ -625,7 +627,7 @@
   camera.position.set(0.34, 0.20, 0.38);           // trois-quarts devant
 
   var controles = new THREE.OrbitControls(camera, renderer.domElement);
-  controles.target.set(0, 0.10, 0);                // mi-hauteur du corps ₿ (201 mm, axe à 41,5 mm)
+  controles.target.set(0, 0.10, 0);                // mi-hauteur du corps (z ≈ 100 mm). L'axe à 42 mm ne la déplace pas.
   controles.enableDamping = true;
   controles.dampingFactor = 0.08;
   controles.minDistance = 0.10;
@@ -843,8 +845,10 @@
   // À ψ = 0 (pas de pivot) on retrouve exactement dx = x_face − x_sonde.
   // Ni la hauteur (mesure horizontale) ni le tangage de la sonde ne
   // comptent : l'écho revient de la face verticale, comme avant.
-  // Le pan de la tête NE tourne PAS le faisceau : sur le châssis v3 le
-  // capteur est fixé au corps (ROADMAP 4.4 : la tête pan/tilt n'existe pas).
+  // Le pan de la tête NE tourne PAS le faisceau. Le firmware a le code
+  // pan/tilt (head.cpp) ; le châssis v3 n'a pas la mécanique (ROADMAP 4.4).
+  // Le HC-SR04 imprimé est fixé au corps : la mesure suit le corps, pas
+  // l'angle de pan. L'angle de pan sert seulement au côté de l'évitement.
   var LOBE_DEMI_ANGLE_DEG = 15;
   function distanceReelleCm() {
     var st = sim.state;

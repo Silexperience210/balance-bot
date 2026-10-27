@@ -132,12 +132,13 @@ chassis/              CAO : gen_bitcoin_bot.py, cotes.py, STL (v3/), NOTES_v3.md
 sim/                  simulateur Python (même correcteur que le firmware)
   web/                simulateur navigateur (Three.js + STL réels)
 docs/                 montage, matériel, impression, guide du simulateur
-scripts/              vérificateur de la règle d'or (simulateur ↔ firmware)
-ROADMAP.md            la feuille de route du projet, avec l'état de chaque chantier
+  revues/             revues croisées d'agents (archivées, rien n'est retiré)
+scripts/              règle d'or (simulateur ↔ firmware) et cohérence des cotes
+ROADMAP.md            feuille de route, état de chaque chantier
 TEST_PROTOCOL.md      protocole du premier essai debout (à lire avant d'allumer)
-BACKLOG.md            suivi de la campagne d'amélioration
-REVIEW_KIMI.md        revue de code indépendante (agent Kimi K3)
-REVIEW_CLAUDE.md      contre-revue indépendante (agent Claude Opus)
+BACKLOG.md            historique de la campagne, avec une lecture en tête
+POWER_GUIDE.md        alimentation des servos, rail séparé
+chassis/RECENTRAGE.md option de recentrage des roues, non appliquée
 ```
 
 ## Méthode
@@ -148,7 +149,7 @@ désaccords ont été tranchés en lisant le code, pas en votant. Elle a produit
 dizaine de corrections réelles (signe d'un terme de commande inversé entre le
 simulateur et le firmware, butée logicielle inversée, zone morte qui transformait le
 terme intégral en cliquet, garde batterie qui coupait en pleine action sur un seul
-échantillon…). Les comptes rendus sont dans le dépôt, avec les correctifs.
+échantillon…). Les comptes rendus sont dans `docs/revues/`, inchangés.
 
 ## Avertissement
 
