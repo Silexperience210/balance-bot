@@ -52,9 +52,12 @@
   var BE = window.BalanceEngine;
   var US = window.Ultrason;
 
-  // Constante géométrique du rendu (pas de physique ici) : rayon de roulement
-  // WHEEL_R = 41,5 mm (gen_bitcoin_bot.py) — l'axe des roues est à 41,5 mm du sol.
-  var R = 0.0415;
+  // Hauteur VISUELLE de l'axe. Le moteur (engine.js) garde R = 0,0415 :
+  // les références de selfcheck.js sont figées dessus. Le maillage, lui,
+  // a son axe à 42 mm (cotes.AXLE_Z) — meta.rayonRoulement, écrit par
+  // l'exporteur. Repli 0,042 si parts.js n'a pas encore de meta.
+  var meta = (window.BALANCEBOT_PARTS && window.BALANCEBOT_PARTS.meta) || {};
+  var R = (typeof meta.rayonRoulement === "number") ? meta.rayonRoulement : 0.042;
 
   // ---- État du viewer ----
   var sim = BE.create(BE.defaults);
@@ -772,8 +775,8 @@
 
   // Position sur la face avant (repère viewer, m) : la coque avant s'étend
   // jusqu'à x = 23 mm (parts.js, b_front) ; lobe haut du ₿, au-dessus de
-  // l'écran (y = +30,5 mm), centré en Z — les yeux de la photo réelle.
-  var US_X = 0.023, US_Y = 0.098;
+  // l'écran, centré en Z — les yeux de la photo réelle. `yeuxY` suit l'axe.
+  var US_X = 0.023, US_Y = (typeof meta.yeuxY === "number") ? meta.yeuxY : 0.0975;
   var moduleUS = moduleHCSR04();
   moduleUS.position.set(US_X, US_Y, 0);
   groupeCorps.add(moduleUS);
@@ -898,9 +901,10 @@
     new THREE.PlaneGeometry(0.056, 0.026),
     new THREE.MeshBasicMaterial({ map: faceTex })   // dalle auto-lumineuse (non éclairée)
   );
-  // Centre de la fenêtre écran (repère design → repère viewer, voir en-tête) :
-  // (X=59,5 ; y=18,0 ; Z=72,0) mm design → (18,0 ; 72,0−41,5 ; 59,5−64,565) mm.
-  ecran.position.set(0.018, 0.0305, -0.005065);
+  // Centre de la dalle, exporté avec les pièces (cotes.ecran_viewer) :
+  // (y = 18 mm, z = 72 − axe, x = 59,5 − milieu des faces de roue).
+  var ecranPos = meta.ecran || [0.018, 0.030, -0.005064];
+  ecran.position.set(ecranPos[0], ecranPos[1], ecranPos[2]);
   ecran.rotation.y = Math.PI / 2;        // la dalle regarde vers l'avant (+x)
   groupeCorps.add(ecran);                // solidaire du corps : tangue avec θ
 

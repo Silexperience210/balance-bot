@@ -14,7 +14,9 @@ Assemblage : COPIÉ de chassis/assets/vue_eclatee.py (référence visuelle) :
     pneus   : même rotation, location (x + sx·10, Y_WHEEL, Z_WHEEL)  (déport de la vue éclatée)
 
 Repère design (Blender, gen_bitcoin_bot.py) : X = gauche→droite (voie),
-Y = arrière→avant, Z = haut ; sol z = 0 ; axe des roues z = WHEEL_R = 41.5 mm.
+Y = arrière→avant, Z = haut ; sol z = 0 ; axe des roues z = cotes.AXLE_Z
+(42,0 mm, rayon monté). La physique du simulateur reste à 41,5 mm :
+selfcheck.js fige des références sur cette valeur. Voir cotes.py.
 
 Repère robot exporté (Three.js, Y-up) — conversion Z_up → Y_up :
     x_three = y_design   (avance / roulement)
@@ -29,26 +31,32 @@ Usage : ~/.hermes/venvs/dfam/bin/python chassis/assets/exporter_parts_web.py
 """
 import base64
 import os
+import sys
 
 import numpy as np
 import trimesh
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(ROOT, "chassis"))
+import cotes  # noqa: E402
+
 V3 = os.path.join(ROOT, "chassis", "v3")
 OUT = os.path.join(ROOT, "sim", "web", "parts.js")
 
-# ── constantes d'assemblage — SOURCE : gen_bitcoin_bot.py, la fonction
-#    d'assemblage RÉELLE (« assembled »). NE PAS reprendre vue_eclatee.py : ses
-#    cotes de pneu/palier sont celles de la vue ÉCLATÉE, donc fausses ici
-#    (déport +10 mm, y = 12,8). En cas de divergence, le générateur fait foi.
-X_MID = 64.565          # centre de l'axe des roues (roues à −8,87 et +138,00)
-TRACK = 146.87          # entraxe des ORIGINES de roue (faces externes) = 138,00 − (−8,87)
-Y_WHEEL = 0.0           # l'axe des roues est DANS le plan de joint (y = 0), PAS 12,8
-Z_WHEEL = 41.5          # axe des roues = rayon de roulement WHEEL_R
-E_PNEU = 0.5            # dt = (WHEEL_W − TIRE_W)/2 : pneu centré sur le disque de jante
+# ── constantes d'assemblage — SOURCE : cotes.py + assemblage_pour_rendu().
+#    NE PAS reprendre vue_eclatee.py : ses cotes sont celles du dessin éclaté.
+#    Les origines de roue sont les FACES externes (z local = 0).
+_face_g, _face_d, X_MID, TRACK = cotes.roues_apres_miroir()
+Y_WHEEL = 0.0           # l'axe des roues est DANS le plan de joint (y = 0)
+Z_WHEEL = cotes.AXLE_Z  # 42,0 mm — rayon monté, pas le brut non étiré 41,5
+E_PNEU = (cotes.WHEEL_W - cotes.TIRE_W) / 2.0
 
 CENTRE = np.array([X_MID, Y_WHEEL, Z_WHEEL])   # → origine du repère robot
-RAYON_ROULEMENT = Z_WHEEL * 0.001              # 0.0415 m
+RAYON_ROULEMENT = Z_WHEEL * 0.001              # hauteur visuelle de l'axe
+# Le module ultrason n'est pas dans les STL. 0,098 m était calé sur un axe
+# à 41,5 mm : on le suit pour qu'il reste dans le lobe haut du glyphe.
+YEUX_Y = 0.098 - (Z_WHEEL - 41.5) * 0.001
+ECRAN = cotes.ecran_viewer()
 
 
 def charge_indexe(nom):
@@ -123,7 +131,9 @@ L.append('    "source": "chassis/v3/b_front.stl, b_back.stl, coin_wheel.stl, coi
 L.append('    "assemblage": "gen_bitcoin_bot.py (assemblage reel : roues a X_MID+/-(TRACK/2), Y_WHEEL=0, pneu a +0.5 mm local)",')
 L.append('    "unites": "m",')
 L.append(f'    "rayonRoulement": {RAYON_ROULEMENT},')
-L.append(f'    "voie": {TRACK * 0.001}')
+L.append(f'    "voie": {TRACK * 0.001},')
+L.append(f'    "ecran": [{ECRAN[0]}, {ECRAN[1]}, {ECRAN[2]}],')
+L.append(f'    "yeuxY": {YEUX_Y}')
 L.append("  },")
 L.append('  "pieces": {')
 total_tri = 0

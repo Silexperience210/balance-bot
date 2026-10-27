@@ -34,7 +34,10 @@
   "use strict";
 
   // ── Paramètres physiques (balancebot_sim.py l.72-74) ─────────────
-  var G = 9.81, R = 0.0415, H = 0.080;      // gravité, rayon de ROULAGE (pneu Ø83 → 41,5 mm), hauteur CoM (m)
+  var G = 9.81, R = 0.0415, H = 0.080;      // gravité, rayon DYNAMIQUE figé (selfcheck), hauteur CoM (m)
+  // Le rayon MONTÉ du châssis est 42,0 mm (cotes.AXLE_Z). On ne le recopie
+  // pas ici : les références de selfcheck.js sont bit à bit sur 0,0415.
+  // Le viewer lit meta.rayonRoulement pour poser le maillage.
   var TAU_SERVO = 0.05, VMAX_SERVO = 250.0; // servo : 1er ordre (s), vitesse max (°/s)
   var DT = 1.0 / 200;                       // pas de contrôle = 200 Hz (comme le code)
 

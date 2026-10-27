@@ -22,6 +22,10 @@
 capteur à ultrasons, et comment ajouter tes propres effets au robot (vent, pente, panne de
 capteur, tape…).
 
+🔧 **[Montage](docs/MONTAGE.md)** · **[Matériel](docs/MATERIEL.md)** · **[Impression](docs/IMPRESSION.md)**
+— assemblage de la chaîne servo-roue, liste des pièces, et réglages de slicing.
+Les cotes qui font foi sont dans `chassis/cotes.py` et `chassis/NOTES_v3.md`.
+
 </div>
 
 ---
@@ -31,7 +35,7 @@ capteur, tape…).
 ![Le prototype sur l'établi](docs/photos/robot-reel.jpg)
 
 Le prototype imprimé en PETG. Le corps **est** le glyphe ₿ ; l'écran couleur lui fait
-un visage, les deux capteurs à ultrasons tiennent lieu d'yeux, et les roues sont
+un visage, les deux transducteurs du HC-SR04 tiennent lieu d'yeux, et les roues sont
 chaussées de bandes TPU imprimées.
 
 ## L'idée
@@ -93,17 +97,20 @@ tenir debout.
 | Actionneurs | 2× servos 9 g **à rotation continue** pour les roues (sélecteur 180°/360° à la compilation) |
 | Batterie | 1S LiPo, mesure par ADC, seuil bas 3,5 V |
 | Boucles | équilibre **200 Hz**, interface 60 Hz, tête/ultrason 50 Hz |
-| Châssis | ₿ 132 × 46 × 201 mm, ~378 g (367 g PETG + 11 g TPU), voie 108 mm |
+| Châssis | ₿ 132 × 46 × 201 mm (enveloppe des coques inchangée). Masses calculées sur les STL, pas pesées : coques ~250 g PETG, roues ~36 g pièce, pneus ~5,3 g TPU pièce |
 
 ![Vue éclatée du châssis](docs/photos/vue-eclatee-1.jpg)
 
 ## Physique et réglage
 
-Le robot est un pendule inversé : rayon de roue **R = 41,5 mm** (pneu Ø83), hauteur
-du centre de gravité **H = 80 mm**, gravité 9,81 m/s². Les gains embarqués sont
-`Kp 25 · Ki 500 · Kd 0,5`, avec une condition de stabilité utile : **Ki > g/R ≈ 300**
-(pour un robot d'environ 40 mm de rayon effectif, un terme intégral trop faible ne
-rattrape jamais une inclinaison lente).
+Le robot est un pendule inversé. Le modèle dynamique (firmware compris, via la
+règle d'or) utilise **R = 41,5 mm**, hauteur du centre de gravité **H = 80 mm**,
+gravité 9,81 m/s². 41,5 mm est le rayon du pneu non étiré (Ø83). Le châssis pose
+l'axe au rayon monté, **42,0 mm** (`chassis/cotes.py`) : le viewer aligne les STL
+là-dessus, la physique ne bouge pas — les auto-tests du simulateur sont figés à
+1e-12 près sur 41,5 mm. Les gains embarqués sont `Kp 25 · Ki 500 · Kd 0,5`, avec
+une condition de stabilité utile : **Ki > g/R ≈ 300** (un terme intégral trop
+faible ne rattrape jamais une inclinaison lente).
 
 Le réglage fin se fait au banc web, sans recompiler.
 
@@ -121,10 +128,10 @@ balance-bot/          FIRMWARE (ce qui tourne sur la carte)
   battery.cpp/h       mesure batterie, seuils, hystérésis
   ui.cpp              écran + écran-visage + boutons
   tuner.cpp/h         banc de réglage web à chaud (AP BalanceBot-Tune)
-chassis/              CAO : gen_bitcoin_bot.py, STL (v3/), NOTES_v3.md, rendus
+chassis/              CAO : gen_bitcoin_bot.py, cotes.py, STL (v3/), NOTES_v3.md
 sim/                  simulateur Python (même correcteur que le firmware)
   web/                simulateur navigateur (Three.js + STL réels)
-docs/                 visuels, vidéo de présentation et guide du simulateur
+docs/                 montage, matériel, impression, guide du simulateur
 scripts/              vérificateur de la règle d'or (simulateur ↔ firmware)
 ROADMAP.md            la feuille de route du projet, avec l'état de chaque chantier
 TEST_PROTOCOL.md      protocole du premier essai debout (à lire avant d'allumer)

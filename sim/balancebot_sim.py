@@ -69,7 +69,10 @@ pour CHERCHER des gains, pas pour certifier ceux qui sont embarqués.
 import math, random, sys
 
 # ── Paramètres physiques ─────────────────────────────────────────────
-G, R, H = 9.81, 0.0415, 0.080       # gravité, rayon de ROULAGE (pneu Ø83 → 41,5 mm), hauteur CoM (m)
+G, R, H = 9.81, 0.0415, 0.080       # gravité, rayon DYNAMIQUE figé (selfcheck), hauteur CoM (m)
+# 41,5 mm = rayon du pneu non étiré (Ø83 / 2). Le châssis pose l'axe au
+# rayon monté, 42,0 mm (chassis/cotes.py AXLE_Z). Ne pas « corriger » R :
+# sim/web/selfcheck.js compare la trajectoire à 1e-12.
 TAU_SERVO, VMAX_SERVO = 0.05, 250.0  # servo : 1er ordre (s), vitesse max (°/s)
 DT = 1.0 / 200                       # pas de contrôle = 200 Hz (comme le code)
 
@@ -100,11 +103,14 @@ SETPOINT_DEG = 0.0                   # kSetpointDeg
 TILT_PER_CMD = 0.06                  # kTiltPerCmd  : ° de consigne par unité de cmdForward
 TURN_PER_CMD = 0.30                  # kTurnPerCmd  : unités de sortie par unité de cmdTurn
 CMD_SLEW_PER_S = 200.0               # kCmdSlewPerS : lissage des consignes (unités/s)
-# Voie des roues (m), plans médians des pneus : faces externes des roues à
-# 146,87 mm (chassis/assets/exporter_parts_web.py TRACK), pneu centré 4 mm en
-# dedans → 138,87 mm. Sert UNIQUEMENT à la cinématique du lacet ci-dessous —
-# le firmware n'a ni cap ni odométrie (head.cpp l.10-15), le lacet est une
-# grandeur du SIMULATEUR (pour voir le pivot), pas une grandeur du robot.
+# Voie FIGÉE des plans médians de pneu (m), pour le lacet du simulateur.
+# Historique : faces externes à 146,87 mm, pneu centré 4 mm en dedans
+# → 138,87 mm. Le châssis courant a des faces plus écartées (moyeu qui
+# entre vraiment, cotes.roues_apres_miroir) : on NE met PAS à jour ce
+# nombre. selfcheck.js compare la trajectoire à 1e-12 près. Le firmware
+# n'a ni cap ni odométrie : le lacet est une grandeur du simulateur.
+# Le rayon dynamique R = 0,0415 (plus haut) a le même statut. L'axe
+# géométrique du châssis, lui, est à 42,0 mm.
 TRACK = 0.13887
 
 

@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-"""Verification finale apres corrections (pores bouches) — a lancer sur les STL courants."""
+"""Verification finale — a lancer sur les STL courants de chassis/v3.
+
+La cote Z de la roue et la hauteur d'axe viennent de chassis/cotes.py
+(le moyeu a grandi pour entrer dans le palier). Le rayon de la sonde
+« jante » suit un bras, pas une poche.
+"""
 import os
+import sys
 import trimesh
 import numpy as np
 from collections import Counter
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import cotes
 
 V3 = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "v3") + os.sep
 nok = ntot = 0
@@ -32,7 +41,8 @@ for label, m in (("b_front", f), ("b_back", b), ("coin_wheel", w), ("coin_tire",
 print("=== cotes ===")
 report("b_front bbox", np.allclose(f.bounds[1] - f.bounds[0], [132.13, 23.02, 201.0], atol=0.05), str(np.round(f.bounds[1] - f.bounds[0], 2)))
 report("b_back bbox", np.allclose(b.bounds[1] - b.bounds[0], [132.13, 29.0, 201.0], atol=0.05), str(np.round(b.bounds[1] - b.bounds[0], 2)))
-report("coin_wheel bbox", np.allclose(w.bounds[1] - w.bounds[0], [80.0, 80.0, 21.01], atol=0.05), str(np.round(w.bounds[1] - w.bounds[0], 2)))
+z_roue = cotes.WHEEL_W + cotes.HUB_L
+report("coin_wheel bbox", np.allclose(w.bounds[1] - w.bounds[0], [80.0, 80.0, z_roue], atol=0.08), str(np.round(w.bounds[1] - w.bounds[0], 2)))
 report("coin_tire bbox", np.allclose(t.bounds[1] - t.bounds[0], [83.0, 83.0, 7.0], atol=0.05), str(np.round(t.bounds[1] - t.bounds[0], 2)))
 report("front volume ~106 cm3", abs(float(f.volume) / 1000 - 105.8) < 1.5, "%.1f cm3" % (float(f.volume) / 1000))
 report("back volume ~91 cm3", abs(float(b.volume) / 1000 - 91.5) < 1.5, "%.1f cm3" % (float(b.volume) / 1000))
@@ -41,9 +51,10 @@ print("=== fonctionnel ===")
 def ray(m, o, d):
     h = m.ray.intersects_location(np.array([o]), np.array([d]), multiple_hits=True)
     return h[0]
+y_paroi = cotes.BEAR_D / 2 + 0.35          # dans la paroi du tube, hors de l'alésage
 for side, x0, x1 in (("GAUCHE", -6, 14), ("DROIT", 104, 122)):
-    hits = [float(p[0]) for p in ray(f, [x0, 12.8, 41.5], [1, 0, 0])]
-    report("palier %s : paroi du tube a y=12.8" % side, len(hits) >= 2, "croisements x=%s" % [round(h, 2) for h in sorted(hits)])
+    hits = [float(p[0]) for p in ray(f, [x0, y_paroi, cotes.AXLE_Z], [1, 0, 0])]
+    report("palier %s : paroi du tube" % side, len(hits) >= 2, "croisements x=%s" % [round(h, 2) for h in sorted(hits)])
 for (x, z) in ((108.0, 75.5), (108.0, 144.8), (48.0, 33.0), (57.8, 184.6)):
     hits = sorted(float(p[1]) for p in ray(f, [x, -5, z], [0, 1, 0]))
     report("avant-trou M3 (%.1f,%.1f) vide 0.5-16.5" % (x, z), len(hits) == 4 and abs(hits[1] - 0.5) < 0.2 and abs(hits[2] - 16.5) < 0.2, "y=%s" % [round(h, 2) for h in hits])
@@ -57,10 +68,13 @@ for (x, z) in ((77.4, 145.0), (51.4, 145.0)):
     report("oeil HC-SR04 (%.1f,%.1f) debouchant" % (x, z), len(hits) == 0, "y=%s" % [round(h, 2) for h in hits])
 hits = sorted(float(p[1]) for p in ray(f, [59.0, -5, 66.8], [0, 1, 0]))
 report("fenetre ecran debouchante", len(hits) == 0, "y=%s" % [round(h, 2) for h in hits])
-hits = sorted(float(p[2]) for p in ray(w, [0.0, 35.0, -5], [0, 0, 1]))
-report("roue : jante presente (r=35)", len(hits) >= 2, "z=%s" % [round(h, 2) for h in hits])
+# Bras centré sur l'axe +X (angle 0). (0, 35) est au milieu d'une poche.
+hits = sorted(float(p[2]) for p in ray(w, [35.0, 0.0, -5], [0, 0, 1]))
+report("roue : bras present (r=35, angle 0)", len(hits) >= 2 and hits[-1] > cotes.WHEEL_W - 0.6, "z=%s" % [round(h, 2) for h in hits])
 hits = sorted(float(p[2]) for p in ray(t, [0.0, 40.0, -5], [0, 0, 1]))
 report("pneu : matiere (r=40)", len(hits) >= 2, "z=%s" % [round(h, 2) for h in hits])
 
 print()
 print("RESULTAT FINAL : %d/%d" % (nok, ntot))
+if nok != ntot:
+    raise SystemExit(1)

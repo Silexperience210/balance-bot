@@ -61,6 +61,23 @@ jobs:
           fi
           echo "Aucune ressource externe."
 
+  chassis:
+    name: Châssis (cotes + maillages)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Dépendances de mesure
+        run: pip install 'trimesh>=4,<6' numpy
+      - name: Cohérence des cotes dérivées
+        run: python3 chassis/cotes.py
+      - name: Chaîne servo-roue sur les STL
+        run: python3 chassis/review/chaine_roue.py
+      - name: Vérification finale des maillages
+        run: python3 chassis/review/verif_ultime.py
+
   firmware:
     name: Firmware (compilation ESP32-S3)
     runs-on: ubuntu-latest

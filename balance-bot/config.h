@@ -46,7 +46,7 @@
 #define SERVO_HEAD_TILT 10     // tête : inclinaison (SG90 standard)
 
 // ── TYPE des servos de ROUES — sélecteur de mode (compile-time) ─────
-// Deux matériels possibles sur les mêmes broches, même boîtier 23×12.2×29 :
+// Deux matériels possibles sur les mêmes broches, même boîtier 22,8×12,2×22,5 :
 //   0 = SG90 STANDARD 180° (ancienne mécanique v3.1 « pieds en arc ») : le
 //       servo ne connaît que la POSITION. feet.cpp intègre la vitesse du
 //       PID (°/s) en position (°) et écrit l'angle. Débattement FINI.

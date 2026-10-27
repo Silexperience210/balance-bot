@@ -5,12 +5,13 @@ Repère du design (identique au générateur du châssis) :
     X = gauche→droite (largeur)   Y = arrière→avant (profondeur, avant = +Y)
     Z = hauteur (sol = 0)
 
-Cotes utilisées (celles du projet, chassis/gen_bitcoin_bot.py) :
+Dessin d'illustration. Les cotes d'assemblage réelles sont dans
+chassis/cotes.py (axe à 42 mm, moyeu plus long, voie non centrée).
+Les nombres ci-dessous placent les pièces du dessin, ils ne décrivent
+pas le STL :
     carte T-Display-S3 Touch 62 × 26 × 1,2       servo 9 g 22,8 × 12,2 × 22,5
-    axe des roues z = 41,5 (WHEEL_R)             voie des roues 108
-    roue ₿ Ø80 × 8 + moyeu Ø24 × 13              bande TPU Ø83 × 7
     HC-SR04 45 × 20 + transducteurs Ø16, entraxe 26 (z = 145)
-    MPU6050 : dessus du piédestal z = 36,5
+    bande TPU Ø83 × 7
 
 Rendus : chassis/render/eclate_iso.png et chassis/render/interne_avant.png
 Usage  : blender --background --python chassis/assets/vue_eclatee.py
