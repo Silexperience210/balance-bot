@@ -17,7 +17,7 @@ Statuts : ✅ fait · 🔄 en cours · ⏳ à faire · 🔧 demande le robot ou 
 | 1.2 | **Deux cœurs** | ✅ 🔧 | Dans le code : `BALANCE_SPLIT_CORES 1`, équilibre sur le cœur 0, écran/tête/tuner sur le cœur 1, repli mono-cœur par `-D`. Pas d'essai chronométré sur le robot dans cette passe. |
 | 1.3 | **Arrêt sûr** | ✅ 🔧 | Chute : PWM détaché. Perte IMU (> 100 ms), cadence sous 120 Hz, ou boucle figée : en mode roue, **même coupure**, reprise seulement si le robot est tenu droit (< 10° pendant 700 ms). En mode arc, la reprise automatique de la revue M19 est conservée (le servo tient l'angle). Arrêt d'urgence : appui long sur BOOT, verrouillé jusqu'au RESET. Rien de tout ça n'a été rejoué sur le matériel ici. |
 | 1.4 | **Mode d'actionneur** | ✅ 🔧 | `FEET_MODE_CONTINUOUS` vaut **1** (servos 360°). Le CI exige que les deux simulateurs disent `roue`. Les signes `kDirL = −1`, `kDirR = +1` sont l'invariant du montage en miroir, pas un essai au sol. |
-| 1.5 | **Chaîne servo-roue** | ✅ 🔧 | Moyeu qui entre, capot dégagé, semelle à la place de la 4ᵉ vis, roue allégée. Recentrage appliqué : deux STL, milieu des faces sur le glyphe, entraxe des faces inchangé (150,13 mm). Mesures dans `chassis/NOTES_v3.md` et `chassis/RECENTRAGE.md`. Contrôles au pied à coulisse dans `docs/MONTAGE.md`. |
+| 1.5 | **Chaîne servo-roue** | ✅ 🔧 | Moyeu qui entre, capot dégagé, quatre vis d'oreille (plot pour l'oreille basse de la panse), roue allégée. Recentrage appliqué : deux STL, milieu des faces sur le glyphe, entraxe inchangé (150,13 mm). Mesures dans `chassis/NOTES_v3.md`. Montage dans `docs/MONTAGE.md`. |
 
 ## 2. Simulateur
 

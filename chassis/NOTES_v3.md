@@ -84,9 +84,9 @@ Mesuré sur des maillages du dépôt (pas sur un servo en main) :
   sont les cotes déjà codées, pas un relevé au pied à coulisse ;
 - `servo_fit.py` sans capot : intersection 0 mm³ aussi ;
 - la peau de la panse à la hauteur de l'oreille basse (z = 33,6) est à
-  x = 97,3 avant miroir, la face d'oreille à x = 100,4. L'oreille est hors
-  de la peau. Trois vis sur quatre. La semelle compense, elle ne remplace
-  pas la vis.
+  x = 97,3 avant miroir, la face d'oreille à x = 100,4. L'oreille reste
+  hors du cercle. Le plot de la 4e vis est dans le vide derrière elle
+  (prise 3,45 mm, jeux 0,30 et 0,35 mm). La semelle ne remplace pas la vis.
 
 À contrôler en main, SG90 ou FS90R selon ce qui est monté. Ne pas prendre
 les chiffres suivants pour une mesure :
@@ -120,8 +120,9 @@ centrale le plaque), puis enfiler la roue. Pas de vis traversant la face ₿.
 ## Vis
 
 - Oreilles de servo : vis livrées avec le SG90 (≈ Ø1,9 × 6,5) ou M2 × 6.
-  Pas M2 × 8 : elles débouchaient sur la peau. Avant-trous Ø1,7 borgnes.
-  Côté panse, seule l'oreille haute a de la matière.
+  Pas M2 × 8. Avant-trous Ø1,7. Les trois vis de cloison sont borgnes.
+  La quatrième (oreille basse, panse) traverse le plot et s'arrête avant
+  la face de sortie du servo. Détail : `docs/MONTAGE.md`.
 - Coques : 4 vis M3 × 30, tête noyée Ø6,4, passage Ø3,4, avant-trou Ø2,5
   (était Ø2,6 ; 2,5 mord mieux dans le PETG, les rayons du test de position
   y = 0,5…16,5 sont inchangés).

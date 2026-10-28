@@ -129,10 +129,81 @@ M3_PILOT_D = 2.5
 # dans le test d'intersection : ce 0,5 n'est PAS une cote au pied à coulisse,
 # c'est une saillie d'ingénierie pour la bavure de moulage. On passe 0,2 mm
 # sous cette enveloppe, donc 0,7 mm sous le corps nominal du datasheet.
-# Les vis d'oreille restent le centrage ; la semelle empêche la chute dans
-# le jeu de baie (SV_CLR = 1 mm) quand l'oreille basse de la panse, hors
-# peau, ne peut pas être vissée.
+# Les vis d'oreille restent le centrage. La semelle empêche la chute dans
+# le jeu de baie (SV_CLR = 1 mm). L'oreille basse de la panse est hors du
+# cercle : sa vis est prise par plot_vis4(), pas par la semelle.
 SHELF_DROP = 0.70
+
+# Bavure d'ingénierie du modèle servo (review/sg90_model.SG_TAB). Pas une
+# cote au pied à coulisse. Le plot de la 4e vis passe sous cette enveloppe.
+SERVO_TAB = 0.50
+
+
+def plot_vis4():
+    """Plot de la 4e vis, oreille basse de la panse, avant le miroir.
+
+    La peau à la hauteur du trou est en deçà de la face d'oreille : le
+    cercle de la panse ne peut pas recevoir la vis. Le plot occupe le vide
+    entre cette face et la face de sortie du servo (il ne touche ni l'un
+    ni l'autre), et deux joues hors de l'oreille le soudent à la paroi.
+    L'arbre, les tubes et la boîte des coques ne bougent pas.
+
+    Repère avant miroir. La panse est à +X, ``d = −1``.
+    """
+    x_face = X_WALL_R - WALL
+    x_ear = x_face - (SV_H - SV_FLANGE_Z - SV_FLANGE_T)
+    z_sv0 = AXLE_Z - SV_SHAFT_OFF
+    z_mid = z_sv0 + SV_L / 2.0
+    z_hole = z_mid - SV_HOLE_PITCH / 2.0
+    gap_oreille, gap_face = 0.30, 0.35
+    x0 = x_ear + gap_oreille
+    x1 = x_face - gap_face
+    # Le corps du modèle, bavure comprise, commence à z_sv0 − SERVO_TAB.
+    z1 = (z_sv0 - SERVO_TAB) - 0.30
+    z0 = z_hole - 2.00
+    oreille_z_min = z_sv0 + (SV_L / 2.0 - SV_TAB_SPAN / 2.0)
+    return dict(
+        x0=x0, x1=x1, y0=-9.2, y1=9.2, z0=z0, z1=z1,
+        z_hole=z_hole, x_ear=x_ear, x_face=x_face,
+        gap_oreille=gap_oreille, gap_face=gap_face,
+        engagement=x1 - x0,
+        # La joue entre dans le plot sans partager une face (booléen EXACT).
+        joue_y0=7.4, joue_y1=8.6,
+        joue_x0=92.0,
+        joue_z0=z_hole - 1.4, joue_z1=z_hole + 1.4,
+        oreille_z_min=oreille_z_min,
+    )
+
+
+def _verifier_plot_vis4():
+    p = plot_vis4()
+    erreurs = []
+    if p["engagement"] < 3.2:
+        erreurs.append("prise de la 4e vis < 3,2 mm (%.2f)" % p["engagement"])
+    if p["x0"] < p["x_ear"] + 0.25:
+        erreurs.append("le plot mange l'oreille")
+    if p["x1"] > p["x_face"] - 0.30:
+        erreurs.append("le plot mange la face de sortie")
+    if p["z1"] > (AXLE_Z - SV_SHAFT_OFF - SERVO_TAB) - 0.25:
+        erreurs.append("le plot rencontre la bavure du corps")
+    if p["joue_y1"] >= 9.2 - 0.3:
+        erreurs.append("la joue partage la face du plot")
+    if p["joue_y0"] < SV_W / 2.0 + 1.0:
+        erreurs.append("la joue rencontre l'oreille")
+    if p["z0"] < 28.0 or p["z1"] > AXLE_Z:
+        erreurs.append("le plot sort de la zone sous l'axe")
+    if erreurs:
+        raise SystemExit("plot 4e vis incohérent :\n  - " + "\n  - ".join(erreurs))
+
+
+def plot_vis4_miroir():
+    """Même plot après ``x → GW − x``. ``x0`` < ``x1``."""
+    src = plot_vis4()
+    p = dict(src)
+    p["x0"], p["x1"] = GW - src["x1"], GW - src["x0"]
+    # La soudure (côté cavité, x petit avant miroir) devient le grand x.
+    p["x_soudure"] = GW - src["joue_x0"]
+    return p
 
 PETG_G_PER_CM3 = 1.27
 TPU_G_PER_CM3 = 1.20
@@ -145,6 +216,7 @@ def x_wall_panse(z=AXLE_Z):
 
 
 X_WALL_R = x_wall_panse()
+_verifier_plot_vis4()
 # Longueur de tube AU-DELÀ de la peau si les deux côtés étaient égaux.
 # C'est la référence qui figeait le débord panse à x = GW + WHEEL_GAP, et
 # donc la largeur de la boîte du corps. On ne la réécrit pas : le

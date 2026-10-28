@@ -341,9 +341,11 @@ def build_body():
         booleen(bulk, glyph_solids(y_cav_b - 3, y_cav_f + 3, inset=WALL - 0.6), 'INTERSECT')   # jamais hors de la peau
         ajouts.append(bulk)
         servo_x.append((x_face, d, x_bulk_in))
-        # Semelle sous le corps du servo. L'oreille BASSE côté panse tombe hors
-        # de la peau : 3 vis sur 4. La semelle est unionnée APRÈS la rainure
-        # `svwin`, sinon SV_CLR en rabote le dessus. Son dessus est
+        # Semelle sous le corps du servo. L'oreille basse de la panse est hors
+        # du cercle : la vis passe dans un plot ajouté plus bas, la semelle
+        # empêche seulement le servo de descendre dans le jeu de baie. Elle
+        # est unionnée APRÈS la rainure `svwin`, sinon SV_CLR en rabote le
+        # dessus. Son dessus est
         # cotes.SHELF_DROP sous le corps nominal (0,7 = 0,5 d'enveloppe de
         # bavure non mesurée + 0,2 de jeu) pour que servo_fit reste à 0 mm³.
         # 8 → 14 mm : après les oreilles (6,6), avant la sortie de câble
@@ -481,6 +483,26 @@ def build_body():
     soustraire(env, outils)
     for shelf in semelles:
         booleen(env, shelf, 'UNION')
+    # ── Plot de la 4e vis (oreille basse, panse). La peau à z du trou est
+    #    en deçà de la face d'oreille : on ne gonfle pas le cercle. Le plot
+    #    est dans le vide entre l'oreille et la face de sortie. Deux joues,
+    #    à côté de l'oreille, le soudent à la paroi. Cotes :
+    #    cotes.plot_vis4(). L'avant-trou d'origine a été soustrait avant
+    #    cette union : on le reperce à travers le plot.
+    p4 = cotes.plot_vis4()
+    # Un seul solide avant de toucher la coque : les faces du plot et des
+    # joues ne sont pas coplanaires, sinon le booléen EXACT laisse un voile.
+    morceaux = [boite('plot_vis4', p4['x0'], p4['x1'], p4['y0'], p4['y1'], p4['z0'], p4['z1'])]
+    for sy in (1, -1):
+        morceaux.append(boite('joue_vis4', p4['joue_x0'], p4['x1'] - 0.40,
+                              sy * p4['joue_y0'], sy * p4['joue_y1'],
+                              p4['joue_z0'] + 0.30, p4['joue_z1'] - 0.30))
+    plot = fusionner('plot_vis4', morceaux)
+    booleen(env, plot, 'UNION')
+    # Trou débouchant dans le plot, arrêté avant la face de sortie.
+    pil = cylindre('pil_vis4', SV_PILOT_D, (p4['x1'] + 0.20) - (p4['x0'] - 0.40), 'X',
+                   ((p4['x0'] - 0.40 + p4['x1'] + 0.20) / 2, 0.0, p4['z_hole']))
+    booleen(env, pil, 'DIFFERENCE')
     return nettoyer(env)
 
 def couper_bisect(ob, garde_plus):

@@ -142,13 +142,38 @@ def main():
            any(abs(x - sh_p) < 0.6 for x in xs_sous),
            "z=%.1f croisements %s" % (z_sous, [round(x, 2) for x in xs_sous[:6]]))
 
-    print("=== semelle (la 4e vis d'oreille n'existe pas) ===")
+    print("=== 4e vis : plot sous l'oreille basse de la panse ===")
     z_bas = cotes.AXLE_Z - cotes.SV_SHAFT_OFF + cotes.SV_L / 2 - cotes.SV_HOLE_PITCH / 2
     peau = cotes.x_wall_panse(z_bas)
     x_bulk = (cotes.X_WALL_R - cotes.WALL) - (cotes.SV_H - cotes.SV_FLANGE_Z - cotes.SV_FLANGE_T)
-    report("oreille basse panse hors peau",
+    report("peau toujours en deçà de l'oreille",
            peau < x_bulk - 1.0,
            "peau x=%.2f, face d'oreille x=%.2f (avant miroir)" % (peau, x_bulk))
+    p4 = cotes.plot_vis4_miroir()
+    # À côté du trou (hors Ø1,7) : de la matière sur toute la prise.
+    xs = rayon(f, [-5.0, 2.0, p4["z_hole"]], [1, 0, 0])
+    dans = [x for x in xs if p4["x0"] - 0.4 <= x <= p4["x1"] + 0.4]
+    prise = (max(dans) - min(dans)) if len(dans) >= 2 else 0.0
+    report("plot : prise ≥ 3 mm",
+           prise + 0.15 >= p4["engagement"] and prise >= 3.0,
+           "mesuré %.2f, cotes %.2f, x=%s" % (prise, p4["engagement"], [round(x, 2) for x in dans]))
+    # Dans le trou : le rayon le traverse, il ne reste pas un bouchon.
+    xs = rayon(f, [-5.0, 0.4, p4["z_hole"]], [1, 0, 0])
+    bouchon = [x for x in xs if p4["x0"] + 0.3 < x < p4["x1"] - 0.3]
+    report("avant-trou Ø1,7 ouvert dans le plot",
+           len(bouchon) == 0,
+           "croisements dans le plot %s" % [round(x, 2) for x in bouchon])
+    # Loin du plot, le cercle de la panse n'a pas bougé.
+    xs = rayon(f, [-5.0, 14.0, p4["z_hole"]], [1, 0, 0])
+    peau_m = cotes.GW - peau
+    report("cercle de la panse inchangé hors du plot",
+           any(abs(x - peau_m) < 0.4 for x in xs),
+           "peau miroir %.2f, hits %s" % (peau_m, [round(x, 2) for x in xs[:6]]))
+    # Joue : de la matière depuis la soudure jusqu'au plot (pas un îlot).
+    xs = rayon(f, [5.0, p4["joue_y0"] + 0.4, p4["z_hole"]], [1, 0, 0])
+    report("joue soudée au plot",
+           any(x < p4["x0"] + 0.5 for x in xs) and any(x > p4["x0"] + 1.5 for x in xs),
+           "hits %s" % [round(x, 2) for x in xs[:8]])
     # Semelle : sous le corps, z de (z_sv0 - 2,6) à (z_sv0 - 0,2).
     z_sv0 = cotes.AXLE_Z - cotes.SV_SHAFT_OFF
     z_haut = z_sv0 - cotes.SHELF_DROP

@@ -39,7 +39,7 @@ pesées : coques 133 g + 117 g, roue panse 39 g, roue spine 33 g, pneu 5,3 g. D�
 | Vis | Nombre | Où |
 |---|---|---|
 | M3 × 30, tête cylindrique bombée ou fraisée Ø ≤ 6,4 | 4 | fermeture des coques |
-| M2 × 6, ou les vis du sachet servo (≈ Ø1,9 × 6,5) | 3 pour les roues | oreilles. La quatrième oreille (basse, panse) n'a pas de trou utile |
+| M2 × 6, ou les vis du sachet servo (≈ Ø1,9 × 6,5) | 4 pour les roues | une par oreille. La basse de la panse se prend dans le plot |
 | M2 courtes | 2 + 2 | carte (entraxe des trous réels) et MPU (entraxe 15 mm) |
 | Vis de palonnier (livrée) | 2 | centre de l'arbre, **avant** d'enfiler la roue |
 

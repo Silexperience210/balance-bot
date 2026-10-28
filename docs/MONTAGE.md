@@ -31,14 +31,18 @@ du dépôt.
    (autotaraudage PETG). Ne pas serrer à fond avant que les servos soient
    en place : les baies s'ouvrent par le joint.
 2. **Servos de roues**, tête vers le bas, face de sortie contre la paroi
-   latérale intérieure. Quatre oreilles, **trois vis** : le spine a ses
-   deux oreilles, la panse seulement l'oreille haute. L'oreille basse de
-   la panse tombe hors de la peau (mesuré sur le maillage : peau x = 97,3,
-   face d'oreille x = 100,4 avant miroir). Une semelle sous le corps,
-   0,7 mm sous la cote nominale, empêche le servo de descendre dans le jeu
-   de la baie. Elle ne le centre pas : ce sont les vis.
-   Vis : celles du sachet SG90, ou M2 × 6. Pas M2 × 8 (la peau est à 2,4 mm,
-   la vis longue débouche).
+   latérale intérieure. **Quatre vis**, une par oreille. Le spine a ses
+   deux avant-trous dans la cloison. Côté panse, l'oreille haute aussi.
+   L'oreille basse tombe hors du cercle (mesuré : peau x = 97,3, face
+   d'oreille x = 100,4 avant miroir). Le plot de la 4e vis est dans le
+   vide entre cette face et la face de sortie du servo : prise 3,45 mm,
+   avant-trou Ø1,7, jeu 0,30 mm devant l'oreille et 0,35 mm devant la
+   face de sortie. Deux joues, à côté de l'oreille, le soudent à la paroi.
+   La semelle sous le corps, 0,7 mm sous la cote nominale, empêche le
+   servo de descendre dans le jeu de la baie. Elle ne remplace pas la vis.
+   Vis : celles du sachet SG90 (≈ Ø1,9 × 6,5), ou M2 × 6. Pas M2 × 8 :
+   dans la cloison elles débouchaient, et dans le plot la pointe
+   viendrait toucher la face du servo.
    Câble : il sort du bout court, vers le bas. La semelle s'arrête avant
    cette sortie. `servo_fit.py` mesure une course libre de 4,3 mm côté
    panse et 7,7 mm côté spine avant le prochain obstacle (le plancher de

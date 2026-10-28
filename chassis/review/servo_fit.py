@@ -45,6 +45,11 @@ if not _prop["applique"] or abs(_prop["ecart_roues_mm"]) > 1e-6:
     raise SystemExit("servo_fit : le recentrage n'est pas appliqué")
 if abs(_prop["entraxe_faces_mm"] - _prop["entraxe_symetrique_mm"]) > 1e-6:
     raise SystemExit("servo_fit : la voie des faces a changé")
+if abs(SG.SG_TAB - cotes.SERVO_TAB) > 1e-9:
+    raise SystemExit("servo_fit : SG_TAB et cotes.SERVO_TAB divergent")
+_p4 = cotes.plot_vis4()
+if _p4["gap_oreille"] < 0.25 or _p4["gap_face"] < 0.25 or _p4["engagement"] < 3.2:
+    raise SystemExit("servo_fit : le plot de la 4e vis n'a plus son jeu")
 
 r_low = (LOW['zt'] - LOW['zb']) / 2
 cz_low = (LOW['zt'] + LOW['zb']) / 2

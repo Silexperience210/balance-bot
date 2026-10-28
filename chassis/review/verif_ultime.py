@@ -39,7 +39,9 @@ for label, m in (("b_front", f), ("b_back", b),
     free = sum(1 for e, n in c.items() if n == 1)
     nonman = sum(1 for e, n in c.items() if n > 2)
     comps = len(m.split(only_watertight=False))
-    report("%s : aretes libres = 0" % label, free == 0, "%d libre(s), %d non-manifold, %d composante(s), watertight=%s" % (free, nonman, comps, m.is_watertight))
+    report("%s : aretes libres = 0" % label,
+           free == 0 and nonman == 0 and m.is_watertight,
+           "%d libre(s), %d non-manifold, %d composante(s), watertight=%s" % (free, nonman, comps, m.is_watertight))
 
 print("=== cotes ===")
 report("b_front bbox", np.allclose(f.bounds[1] - f.bounds[0], [132.13, 23.02, 201.0], atol=0.05), str(np.round(f.bounds[1] - f.bounds[0], 2)))
@@ -62,6 +64,15 @@ print("=== fonctionnel ===")
 def ray(m, o, d):
     h = m.ray.intersects_location(np.array([o]), np.array([d]), multiple_hits=True)
     return h[0]
+p4 = cotes.plot_vis4_miroir()
+hits = sorted(float(p[0]) for p in ray(f, [-5.0, 2.0, p4["z_hole"]], [1, 0, 0]))
+dans = [h for h in hits if p4["x0"] - 0.5 <= h <= p4["x1"] + 0.5]
+report("plot 4e vis : matière",
+       len(dans) >= 2 and (max(dans) - min(dans)) >= 3.0,
+       "x=%s" % [round(h, 2) for h in dans])
+hits = sorted(float(p[0]) for p in ray(f, [-5.0, 0.4, p4["z_hole"]], [1, 0, 0]))
+bouchon = [h for h in hits if p4["x0"] + 0.3 < h < p4["x1"] - 0.3]
+report("plot 4e vis : trou ouvert", len(bouchon) == 0, "x=%s" % [round(h, 2) for h in bouchon])
 y_paroi = cotes.BEAR_D / 2 + 0.35          # dans la paroi du tube, hors de l'alésage
 bo_p, bo_s = cotes.bouches_tube_apres_miroir()
 for side, x0, bouche in (("panse", bo_p - 12.0, bo_p), ("spine", bo_s - 20.0, bo_s)):

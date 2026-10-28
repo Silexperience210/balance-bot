@@ -117,6 +117,14 @@ def main():
        "E.constants.R === 0.0415" in selfcheck
        and "E.constants.TRACK === 0.13887" in selfcheck,
        "selfcheck.js")
+    p4 = cotes.plot_vis4()
+    ok("plot de la 4e vis ≥ 3,2 mm, hors du servo",
+       p4["engagement"] >= 3.2 and p4["gap_oreille"] >= 0.25 and p4["gap_face"] >= 0.25
+       and "plot_vis4" in gen,
+       "prise %.2f mm" % p4["engagement"])
+    ok("montage décrit le plot de la 4e vis",
+       "plot de la 4e vis" in montage and "Quatre vis" in montage,
+       "MONTAGE.md")
 
     print()
     if echecs:
