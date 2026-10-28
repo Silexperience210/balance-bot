@@ -4,8 +4,8 @@
 
 Ce n'est pas une mesure de maillage (c'est chaine_roue.py). Ici on
 vérifie que les textes qui prétendent décrire le robot disent la même
-chose que chassis/cotes.py, et que le recentrage des roues n'a pas été
-appliqué en douce.
+chose que chassis/cotes.py, et que le recentrage est bien celui décrit
+dans chassis/RECENTRAGE.md : appliqué, voie inchangée, deux roues.
 
 Deux rayons coexistent exprès :
   · 42,0 mm — axe géométrique, WHEEL_RADIUS_MM, viewer ;
@@ -43,9 +43,12 @@ def main():
     pieds = lit("balance-bot/feet.cpp")
     notes = lit("chassis/NOTES_v3.md")
     readme = lit("README.md")
+    montage = lit("docs/MONTAGE.md")
+    impression = lit("docs/IMPRESSION.md")
     eng = lit("sim/web/engine.js")
     sim = lit("sim/balancebot_sim.py")
     gen = lit("chassis/gen_bitcoin_bot.py")
+    selfcheck = lit("sim/web/selfcheck.js")
 
     print("— géométrie —")
     rayon = define_float(cfg, "WHEEL_RADIUS_MM")
@@ -70,16 +73,50 @@ def main():
     print("— visserie et recentrage —")
     ok("NOTES : M2 × 6 (pas la cote courante M2 × 8)",
        "M2 × 6" in notes and "Pas M2 × 8" in notes, "NOTES_v3.md")
-    mil, dec = cotes.milieu_axes()
-    ok("roues NON recentrées (écart < −5 mm)",
-       dec < -5.0, "milieu %.2f, écart %+.2f" % (mil, dec))
+    _mil, dec_peaux = cotes.milieu_axes()
+    ok("peaux non déplacées (écart < −5 mm)",
+       dec_peaux < -5.0, "écart peaux %+.2f" % dec_peaux)
     prop = cotes.proposition_recentrage()
-    ok("proposition de recentrage inactive",
-       prop["applique"] is False and "proposition_recentrage" not in gen,
-       "delta %+.2f mm, générateur ne la lit pas" % prop["delta_mm"])
-    ok("moyeu spine de la proposition encore positif",
-       prop["moyeu_spine_mm"] > cotes.PILE["pocket_depth"],
-       "moyeu %.2f > empreinte %.2f" % (prop["moyeu_spine_mm"], cotes.PILE["pocket_depth"]))
+    ok("recentrage appliqué",
+       prop["applique"] is True
+       and "TUBE_PANSE" in gen and "TUBE_SPINE" in gen
+       and "HUB_PANSE" in gen and "HUB_SPINE" in gen
+       and "cotes.HUB_L" not in gen and "cotes.TUBE_LEN" not in gen,
+       "delta %+.2f mm" % prop["delta_mm"])
+    _mr, dec_roues = cotes.milieu_roues()
+    ok("milieu des roues sur GW/2",
+       abs(dec_roues) < 1e-6 and abs(prop["ecart_roues_mm"]) < 1e-6,
+       "écart %+.4f mm" % dec_roues)
+    ok("voie des faces = montage symétrique",
+       abs(prop["entraxe_faces_mm"] - prop["entraxe_symetrique_mm"]) < 1e-6
+       and abs(prop["entraxe_faces_mm"] - cotes.ENTRAXE_SYM_MM) < 1e-9,
+       "%.4f mm" % prop["entraxe_faces_mm"])
+    ok("jeu d'épaulement 0,40 des deux côtés",
+       abs(prop["jeu_epaulement_mm"] - 0.40) < 1e-9
+       and abs(cotes.PILE_PANSE["bore_depth"] - cotes.PILE_PANSE["engagement"] - 0.40) < 1e-6
+       and abs(cotes.PILE_SPINE["bore_depth"] - cotes.PILE_SPINE["engagement"] - 0.40) < 1e-6,
+       "jeu %.2f" % prop["jeu_epaulement_mm"])
+    ok("empreinte tenue des deux côtés",
+       cotes.PILE_SPINE["engagement"] > cotes.PILE_SPINE["pocket_depth"] + 2.0
+       and cotes.PILE_PANSE["engagement"] > cotes.PILE_PANSE["pocket_depth"] + 2.0
+       and abs(cotes.PILE_PANSE["pocket_depth"] - cotes.PILE_SPINE["pocket_depth"]) < 1e-9,
+       "spine engagé %.2f, empreinte %.2f"
+       % (cotes.PILE_SPINE["engagement"], cotes.PILE_SPINE["pocket_depth"]))
+    ok("NOTES nomment les deux roues",
+       "coin_wheel_panse.stl" in notes and "coin_wheel_spine.stl" in notes,
+       "NOTES_v3.md")
+    ok("montage : panse = moyeu long, spine = moyeu court",
+       "coin_wheel_panse" in montage and "coin_wheel_spine" in montage
+       and "moyeu long" in montage and "moyeu court" in montage,
+       "MONTAGE.md")
+    ok("impression : une plaque par roue",
+       "plateR_roue_panse" in impression and "plateR_roue_spine" in impression
+       and "panse" in impression and "spine" in impression,
+       "IMPRESSION.md")
+    ok("selfcheck fige R et TRACK au bit",
+       "E.constants.R === 0.0415" in selfcheck
+       and "E.constants.TRACK === 0.13887" in selfcheck,
+       "selfcheck.js")
 
     print()
     if echecs:

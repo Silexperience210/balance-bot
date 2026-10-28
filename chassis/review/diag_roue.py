@@ -4,7 +4,7 @@ import os
 import trimesh
 import numpy as np
 
-w = trimesh.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "v3", "coin_wheel.stl"), process=True)
+w = trimesh.load(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "v3", "coin_wheel_panse.stl"), process=True)
 w.merge_vertices()
 print("bbox:", [round(float(x), 2) for x in w.bounds[0]], "->", [round(float(x), 2) for x in w.bounds[1]])
 for (x, y) in ((0, 0), (3, 0), (0, 5), (0, 11), (0, 12.5), (0, 20), (0, 30), (0, 39), (0, 41)):

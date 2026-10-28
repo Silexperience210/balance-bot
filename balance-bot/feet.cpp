@@ -4,7 +4,9 @@
 //
 // Mécanique RÉELLE (chassis/NOTES_v3.md, photo docs/photos/robot-reel.jpg) :
 // deux roues Ø80 + pneu TPU Ø83 (rayon monté 42 mm, chassis/cotes.py)
-// sur servos 9 g à rotation continue. Le nom
+// sur servos 9 g à rotation continue. Les moyeux sont asymétriques
+// (panse plus long, spine plus court) : le rayon et les signes ne
+// changent pas. Le nom
 // « pied » et la course φ (°) sont conservés : pour l'équilibre, une roue
 // est un arc de rayon R qui roule sans limite de course — quand le servo
 // tourne de φ, le robot se déplace de R·φ.

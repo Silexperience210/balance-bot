@@ -97,9 +97,13 @@ pieces.append(("b_front", "coque", transforme(v, IDENT, ZERO), f))
 v, f = charge_indexe("b_back.stl")
 pieces.append(("b_back", "coque", transforme(v, IDENT, ZERO), f))
 
-v_roue, f_roue = charge_indexe("coin_wheel.stl")
+# D (sx=−1, x petit) = panse, moyeu long. G = spine, moyeu court.
+# L'origine reste la face externe : X_MID ± entraxe/2 est encore juste,
+# les deux faces étant symétriques autour du glyphe.
+FICHIERS_ROUE = {"D": "coin_wheel_panse.stl", "G": "coin_wheel_spine.stl"}
 v_pneu, f_pneu = charge_indexe("coin_tire.stl")
 for cote, sx in (("D", -1), ("G", 1)):
+    v_roue, f_roue = charge_indexe(FICHIERS_ROUE[cote])
     x = X_MID + sx * (TRACK / 2)
     rot = rot_y(-sx * np.pi / 2)                    # rotation_euler = (0, -sx·π/2, 0)
     loc_roue = np.array([x, Y_WHEEL, Z_WHEEL])
@@ -127,7 +131,7 @@ L.append("     x = avance (ex-Y design)   y = haut (ex-Z design)   z = axe des r
 L.append("   Origine : point central de l'axe des roues ; unités : mètres. */")
 L.append("window.BALANCEBOT_PARTS = {")
 L.append('  "meta": {')
-L.append('    "source": "chassis/v3/b_front.stl, b_back.stl, coin_wheel.stl, coin_tire.stl",')
+L.append('    "source": "chassis/v3/b_front.stl, b_back.stl, coin_wheel_panse.stl, coin_wheel_spine.stl, coin_tire.stl",')
 L.append('    "assemblage": "gen_bitcoin_bot.py (assemblage reel : roues a X_MID+/-(TRACK/2), Y_WHEEL=0, pneu a +0.5 mm local)",')
 L.append('    "unites": "m",')
 L.append(f'    "rayonRoulement": {RAYON_ROULEMENT},')

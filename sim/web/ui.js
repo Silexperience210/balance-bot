@@ -907,7 +907,8 @@
   );
   // Centre de la dalle, exporté avec les pièces (cotes.ecran_viewer) :
   // (y = 18 mm, z = 72 − axe, x = 59,5 − milieu des faces de roue).
-  var ecranPos = meta.ecran || [0.018, 0.030, -0.005064];
+  // Repli si meta manque : cotes.ecran_viewer() après recentrage (milieu = 59).
+  var ecranPos = meta.ecran || [0.018, 0.030, 0.0005];
   ecran.position.set(ecranPos[0], ecranPos[1], ecranPos[2]);
   ecran.rotation.y = Math.PI / 2;        // la dalle regarde vers l'avant (+x)
   groupeCorps.add(ecran);                // solidaire du corps : tangue avec θ

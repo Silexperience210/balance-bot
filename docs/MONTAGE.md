@@ -46,14 +46,22 @@ du dépôt.
 3. **Palonnier.** Le visser sur l'arbre **avant** d'enfiler la roue. La vis
    centrale le plaque. La face ₿ de la roue n'est pas percée : on ne peut
    plus passer un tournevis après coup.
-4. **Roue.** Moyeu Ø24 dans le palier Ø24,5. Il s'arrête 0,40 mm avant
-   l'épaulement (mesuré : alésage utile 13,73 mm, moyeu engagé 13,33 mm).
-   L'empreinte en croix fait 4,80 mm de profondeur pour admettre un
-   palonnier posé sur le bossage de 1,5 mm **ou** sur un capot de 4 mm.
-   Dans le premier cas il y a du jeu axial : c'est la vis du palonnier qui
-   retient, pas le fond de l'empreinte.
-   La roue n'est pas au milieu du glyphe (écart −5,6 mm vers le spine).
-   C'est la géométrie de la panse ronde. On ne recentre pas.
+4. **Roue.** Deux pièces, pas interchangeables. En regardant le ₿ de face :
+   - à gauche, côté des deux ronds (la panse) : `coin_wheel_panse.stl`,
+     moyeu long (19,89 mm). Plaque `plateR_roue_panse.stl` ;
+   - à droite, côté de la barre droite (le spine) : `coin_wheel_spine.stl`,
+     moyeu court (8,76 mm). Plaque `plateR_roue_spine.stl`.
+   Moyeu Ø24 dans le palier Ø24,5. Les deux s'arrêtent 0,40 mm avant
+   l'épaulement (mesuré sur les STL : panse, alésage utile 19,29 mm et
+   moyeu engagé 18,89 mm ; spine, 8,16 mm et 7,76 mm). L'empreinte en
+   croix fait 4,80 mm des deux côtés, y compris dans le moyeu court.
+   Elle admet un palonnier posé sur le bossage de 1,5 mm **ou** sur un
+   capot de 4 mm. Dans le premier cas il y a du jeu axial : c'est la vis
+   du palonnier qui retient, pas le fond de l'empreinte.
+   Le milieu des roues est sur le centre du glyphe. La voie des pneus
+   n'a pas changé : la panse dépasse de 5,6 mm de plus, le spine de
+   5,6 mm de moins. Le palier spine est plus court. S'il fléchit en
+   charge, c'est un constat de roulage, pas une cote du maillage.
 5. **Pneu.** Bande TPU, Ø intérieur 78, fond de gorge Ø79 : 1,0 mm
    d'interférence au diamètre. L'étirer à la main. Si elle refuse, la
    tiédir ; ne pas agrandir la gorge dans le modèle sans régénérer, le Ø83

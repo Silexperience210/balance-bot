@@ -27,11 +27,11 @@ non nulle).
 | Pièce | Matière | Fichier |
 |---|---|---|
 | Coque avant, coque arrière | PETG | `export/v31/plate1_b_front.stl`, `plate2_b_back.stl` |
-| 2 roues | PETG | `plateR_wheel1.stl`, `plateR_wheel2.stl` |
+| Roue panse (moyeu long) et roue spine (moyeu court) | PETG | `plateR_roue_panse.stl`, `plateR_roue_spine.stl` |
 | 2 bandes | TPU 95A | `plateT_tire1.stl`, `plateT_tire2.stl` |
 
 Masses **calculées** sur les STL (PETG 1,27 g/cm³, TPU 1,20 g/cm³), pas
-pesées : coques 133 g + 117 g, roue 36 g, pneu 5,3 g. Détail dans
+pesées : coques 133 g + 117 g, roue panse 39 g, roue spine 33 g, pneu 5,3 g. Détail dans
 `NOTES_v3.md`.
 
 ## Visserie

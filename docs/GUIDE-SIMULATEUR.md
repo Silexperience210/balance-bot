@@ -112,8 +112,10 @@ différentiel de roues (0,30 par unité), les deux lissés à 200 unités/s — 
 `balance.cpp`. Le lacet ψ et la position au sol sont intégrés depuis la différence de
 vitesse des deux roues sur la voie figée du modèle (139 mm) : c'est une grandeur du
 **simulateur** (pour voir le pivot), le robot n'a ni cap ni odométrie. Les STL courants
-ont les faces externes des roues à 150 mm l'une de l'autre (`chassis/cotes.py`) ; ce
-nombre-là n'entre pas dans la physique, les références de `selfcheck.js` sont figées.
+ont les faces externes des roues à 150,13 mm l'une de l'autre, milieu sur le
+glyphe (`chassis/cotes.py`). Le recentrage a déplacé ce milieu, pas l'écart.
+Ni l'un ni l'autre n'entre dans la physique : les références de `selfcheck.js`
+restent figées sur 0,13887 m.
 
 **Pour le voir** : bouton **`Démo évitement`** (consignes à 0, plaque à 25 cm, RUN). Dès la
 première mesure (0,2 s) le robot **recule et pivote** ; à 1,7 s il ne recule plus et pivote

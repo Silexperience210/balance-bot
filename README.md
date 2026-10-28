@@ -97,7 +97,7 @@ tenir debout.
 | Actionneurs | 2× servos 9 g **à rotation continue** pour les roues (sélecteur 180°/360° à la compilation) |
 | Batterie | 1S LiPo, mesure par ADC, seuil bas 3,5 V |
 | Boucles | équilibre **200 Hz**, interface 60 Hz, tête/ultrason 50 Hz |
-| Châssis | ₿ 132 × 46 × 201 mm (enveloppe des coques inchangée). Masses calculées sur les STL, pas pesées : coques ~250 g PETG, roues ~36 g pièce, pneus ~5,3 g TPU pièce |
+| Châssis | ₿ 132 × 46 × 201 mm (enveloppe des coques inchangée). Roues recentrées sur le glyphe, deux STL. Masses calculées, pas pesées : coques ~250 g PETG, roue panse ~39 g, roue spine ~33 g, pneus ~5,3 g |
 
 ![Vue éclatée du châssis](docs/photos/vue-eclatee-1.jpg)
 
@@ -138,7 +138,7 @@ ROADMAP.md            feuille de route, état de chaque chantier
 TEST_PROTOCOL.md      protocole du premier essai debout (à lire avant d'allumer)
 BACKLOG.md            historique de la campagne, avec une lecture en tête
 POWER_GUIDE.md        alimentation des servos, rail séparé
-chassis/RECENTRAGE.md option de recentrage des roues, non appliquée
+chassis/RECENTRAGE.md recentrage des roues, appliqué (deux STL)
 ```
 
 ## Méthode

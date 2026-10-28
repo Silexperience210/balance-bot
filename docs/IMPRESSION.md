@@ -21,7 +21,8 @@ intersection 0 mm³ dans les deux cas.
 | Pièce | Sur le plateau | Pourquoi |
 |---|---|---|
 | `b_front`, `b_back` | face externe en bas, creux vers le haut | la gravure du ₿ et les contre-poinçons ne sont pas imprimés en l'air |
-| roues | face ₿ en bas, moyeu en l'air | la gravure sort en relief, les poches s'ouvrent vers le haut |
+| `plateR_roue_panse.stl` | face ₿ en bas, moyeu long en l'air | côté des deux ronds, quand on regarde le ₿ de face : à gauche |
+| `plateR_roue_spine.stl` | face ₿ en bas, moyeu court en l'air | côté de la barre droite : à droite |
 | pneus | à plat | anneau, aucun surplomb |
 
 Les coques font 201 mm de long. Un export CLI de certains trancheurs
@@ -41,9 +42,14 @@ Profil d'origine, toujours pertinent pour un PETG 0,4 mm :
 | Adhérence | bordure 5 mm, lit 70–80 °C | bordure | bordure, TPU lent (~25 mm/s) |
 | Ponts | débit 0,9, 25 mm/s, ventilateur 100 % | — | — |
 
-La roue a maintenant six poches ouvertes vers le moyeu, peau externe de
+Les deux roues ont six poches ouvertes vers le moyeu, peau externe de
 1,8 mm (la gravure en prend 1,0). Couche 0,20 mm : cette peau fait neuf
-couches. Ne pas descendre le plancher dans le trancheur.
+couches. Ne pas descendre le plancher dans le trancheur. Le moyeu panse
+fait 27,9 mm de haut au total (disque compris), le spine 16,8 mm. On
+imprime les deux : une seule plaque ne suffit plus. Les coques gardent
+la même boîte ; `make_plates.py` a décalé leur translation de 5,56 mm
+pour que le bord reste à 5 mm du plateau (le recentrage a bougé l'origine
+de la boîte, pas sa taille).
 
 ## Ce qui n'a pas été changé, et pourquoi
 
@@ -63,8 +69,8 @@ couches. Ne pas descendre le plancher dans le trancheur.
 
 ## Contrôle rapide au trancheur
 
-Avant de lancer les huit heures : la roue ne doit pas être pleine (les
-poches se voient entre les six bras), le moyeu ne doit pas être percé
-de part en part, et les coques doivent montrer quatre avant-trous M3
-borgnes côté face. `verif_ultime.py` a déjà vérifié ça sur les STL
-(25/25 au moment de la régénération).
+Avant de lancer les huit heures : chaque roue montre six bras, le moyeu
+n'est pas percé de part en part, et les coques montrent quatre avant-trous
+M3 borgnes côté face. La plaque la plus haute est la roue de panse
+(27,9 mm), pas le spine. `verif_ultime.py` a vérifié les deux STL
+(29/29 au moment de la régénération) et `chaine_roue.py` 43/43.

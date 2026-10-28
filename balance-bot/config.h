@@ -95,6 +95,8 @@
 // elle ne multiplie PAS par ce rayon. Le modèle dynamique du simulateur
 // reste à 41,5 mm (rayon du pneu non étiré) : selfcheck.js est figé
 // dessus. Cette constante sert à la doc et à la CI, pas au PID.
+// Les deux moyeux n'ont pas la même longueur (recentrage, cotes.py) :
+// le rayon est le même des deux côtés, et la boucle n'utilise pas la voie.
 #define WHEEL_RADIUS_MM 42.0f
 // Butée DURE du pied en arc (°) — SOURCE UNIQUE, active seulement si
 // FOOT_TRAVEL_LIMITED. feet.cpp l'applique (clamp de φ + coupure explicite

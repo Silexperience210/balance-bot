@@ -22,6 +22,8 @@ from mathutils import Matrix
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, ".."))
+import cotes  # noqa: E402
 import sg90_model as SG  # noqa: E402
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
@@ -34,11 +36,21 @@ GW, GH, Z0 = 118.0, 165.0, 26.0
 STROKE, WALL = 19.0, 2.4
 Z_MID = Z0 + GH * 0.50
 LOW = dict(zb=Z0, zt=Z_MID + STROKE * 0.5, xr=GW)
-AXLE_Z = 42.0
+AXLE_Z = cotes.AXLE_Z
+# Le recentrage allonge un tube et raccourcit l'autre. Les baies servo,
+# elles, ne bougent pas : ce script le vérifie par l'intersection, et
+# refuse de tourner si les cotes ne sont plus celles du recentrage appliqué.
+_prop = cotes.proposition_recentrage()
+if not _prop["applique"] or abs(_prop["ecart_roues_mm"]) > 1e-6:
+    raise SystemExit("servo_fit : le recentrage n'est pas appliqué")
+if abs(_prop["entraxe_faces_mm"] - _prop["entraxe_symetrique_mm"]) > 1e-6:
+    raise SystemExit("servo_fit : la voie des faces a changé")
 
 r_low = (LOW['zt'] - LOW['zb']) / 2
 cz_low = (LOW['zt'] + LOW['zb']) / 2
 X_WALL_R = (LOW['xr'] - r_low) + math.sqrt(r_low ** 2 - (AXLE_Z - cz_low) ** 2)
+if abs(X_WALL_R - cotes.X_WALL_R) > 1e-6:
+    raise SystemExit("servo_fit : X_WALL_R diverge de cotes.py")
 
 
 def raz():

@@ -1,7 +1,8 @@
-# Recentrage des roues — proposition, non appliquée
+# Recentrage des roues — appliqué
 
-Le milieu des deux axes n'est pas le centre du glyphe. C'est mesuré sur
-la géométrie de `chassis/cotes.py`, pas au pied à coulisse.
+Le milieu des peaux n'est pas le centre du glyphe. C'est mesuré sur la
+géométrie de `chassis/cotes.py`, pas au pied à coulisse. Les peaux n'ont
+pas bougé. On a déplacé les tubes.
 
 | | mm |
 |---|---|
@@ -9,48 +10,67 @@ la géométrie de `chassis/cotes.py`, pas au pied à coulisse.
 | Peau de la panse à hauteur d'axe | 106,87 |
 | Milieu des peaux | 53,44 |
 | Centre du glyphe (`GW / 2`) | 59,00 |
-| Écart | −5,56 vers le spine |
+| Écart des peaux | −5,56 vers le spine |
+| Delta appliqué | +5,56 |
 
-Les deux tubes ont la même longueur (12,13 mm) pour qu'une seule roue
-s'imprime. Le milieu des roues est donc le milieu des peaux. L'enveloppe
-des coques n'a pas été touchée pour corriger ça.
+`cotes.proposition_recentrage()` renvoie `applique = True`. Le générateur
+lit `TUBE_PANSE` et `TUBE_SPINE`.
 
-## Option retenue pour plus tard (pas dans le générateur)
+## Ce qui a été fait
 
 Allonger le tube **panse** de 5,56 mm et raccourcir le tube **spine** de
-5,56 mm. La voie des pneus ne change pas. Le milieu se déplace de 5,56 mm
-vers le centre du glyphe. `python3 chassis/cotes.py` imprime les longueurs
-(`proposition_recentrage`, drapeau `applique = False`).
+5,56 mm. La somme des tubes ne change pas : la voie des pneus non plus,
+ni la taille de la boîte des coques.
 
-Conséquences, à accepter ensemble le jour où on l'applique :
+| | Avant | Appliqué | Mesuré sur les STL |
+|---|---|---|---|
+| Tube au-delà de la peau | 12,13 / 12,13 | panse 17,69, spine 6,56 | bouches x = −7,06 et 125,06 |
+| Moyeu | 14,33 / 14,33 | panse 19,89, spine 8,76 | hauteurs de roue 27,90 et 16,77 (disque 8 mm compris) |
+| Engagement dans le palier | 13,33 | panse 18,89, spine 7,76 | alésages utiles 19,29 et 8,16, jeu 0,40 des deux côtés |
+| Empreinte en croix | 4,80 | 4,80 des deux côtés | 4,81 sur les deux roues |
+| Entraxe des faces | 150,13 | 150,13 | 150,13 |
+| Milieu des faces, après miroir | 64,56 | 59,00 | 59,00 |
+| Boîte `b_front` | 132,13 × 23,02 × 201 | inchangée | inchangée |
+| Boîte `b_back` | 132,13 × 29 × 201 | inchangée | inchangée |
 
-- **Deux STL de roue.** Les moyeux ne font plus la même longueur
-  (environ 19,9 mm côté panse, 8,8 mm côté spine). On ne peut plus
-  imprimer le même fichier deux fois.
-- **Palier spine plus court.** L'engagement du moyeu passe d'environ
-  13,3 mm à 7,8 mm. L'empreinte du palonnier (4,8 mm) tient encore dans
-  le moyeu court. Le servo spine porte la roue avec moins de portée :
-  plus de flexion sur l'arbre, à juger en main, pas sur le maillage.
+Faces externes après miroir : x = −16,06 et 134,06 mm.
+
+Deux STL :
+
+- `chassis/v3/coin_wheel_panse.stl` — moyeu long. Quand on regarde le ₿
+  de face, c'est le côté gauche, celui des deux ronds. Plaque
+  `export/v31/plateR_roue_panse.stl`.
+- `chassis/v3/coin_wheel_spine.stl` — moyeu court. Côté droit, la barre
+  droite du glyphe. Plaque `plateR_roue_spine.stl`.
+
+L'écart de volume entre les deux roues (5,03 cm³) est celui d'un cylindre
+Ø24 × 11,13 mm, la différence des moyeux. Les vides (empreinte, capot,
+arbre) ont la même profondeur depuis le bout, des deux côtés.
+
+## Compromis acceptés
+
+- **Palier spine plus court.** L'engagement passe à 7,76 mm. L'empreinte
+  de 4,80 mm y tient, avec environ 3 mm de marge avant la bouche. Le
+  servo spine porte la roue avec moins de portée : plus de flexion
+  possible sur l'arbre. Ça se juge en roulant, pas sur le maillage.
 - **La panse dépasse de 5,6 mm de plus**, le spine de 5,6 mm de moins.
-  La boîte des coques (132 × 23 × 201 et 132 × 29 × 201) ne change pas.
-  La boîte du robot complet, roues comprises, se décale.
-- **Le simulateur dynamique ne suit pas.** `TRACK = 0,13887` m est figé
-  par `selfcheck.js`. Recentrer les STL ne doit pas « corriger » ce
-  nombre sans régénérer toutes les références, des deux langages, à
-  1e-12 près. Le viewer, lui, relit `cotes.roues_apres_miroir()`.
-- **Plaques d'impression** : `make_plates.py` n'a qu'un STL de roue.
-  Il faudrait une seconde pièce.
+  La boîte du robot complet, roues comprises, se décale. Sa largeur
+  hors tout (entraxe des faces + rien au-delà, les faces SONT les bouts)
+  reste 150,13 mm.
+- **Le simulateur dynamique ne suit pas le milieu.** `TRACK = 0,13887` m
+  reste le littéral de `engine.js`, `balancebot_sim.py` et `selfcheck.js`.
+  Il décrivait déjà un entraxe plus ancien (146,87 mm). Le recentrage ne
+  change pas la voie géométrique des pneus, donc il n'y a pas de nouvelle
+  référence à régénérer. Le viewer, lui, relit `cotes.roues_apres_miroir()` :
+  le milieu des roues est l'origine, le glyphe est centré dessus. La dalle
+  est à 0,5 mm du milieu (`ecran` z = 0,0005 m).
 
-## Options écartées
+## Options toujours écartées
 
-- Déplacer le glyphe dans l'enveloppe pour que son centre tombe sur le
-  milieu des axes. Ça change le dessin du ₿ ou l'enveloppe.
-- N'allonger que la panse de 11,1 mm. Une seule roue reste symétrique
-  seulement si l'autre tube ne bouge pas : le milieu se corrige, mais
-  la voie s'ouvre de 11 mm et la panse porte un bras de levier plus long.
-- Tourner les servos pour gagner la quatrième vis en même temps. Les
-  oreilles selon Y ne tiennent pas dans la cavité sans entailler les
-  parois, et l'arbre quitte le plan y = 0.
+- Déplacer le glyphe dans l'enveloppe. Ça changerait le dessin du ₿.
+- N'allonger que la panse. La voie s'ouvrirait.
+- Tourner les servos pour la quatrième vis. Les oreilles selon Y ne
+  tiennent pas dans la cavité sans entailler les parois.
 
-Tant que `chaine_roue.py` et `scripts/verifier-cotes.py` passent, cette
-option n'est pas dans les STL.
+`chaine_roue.py` et `scripts/verifier-cotes.py` échouent si le milieu
+quitte `GW / 2` ou si l'entraxe quitte la valeur du montage symétrique.

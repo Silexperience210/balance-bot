@@ -60,7 +60,10 @@ def proche(valeur, attendu, tol=ATOL):
 def main():
     f = charge("b_front.stl")
     b = charge("b_back.stl")
-    w = charge("coin_wheel.stl")
+    roues = {
+        "panse": charge("coin_wheel_panse.stl"),
+        "spine": charge("coin_wheel_spine.stl"),
+    }
     t = charge("coin_tire.stl")
 
     print("=== enveloppe (ne doit pas bouger) ===")
@@ -70,7 +73,9 @@ def main():
     report("b_back 132,13 × 29 × 201",
            np.allclose(b.bounds[1] - b.bounds[0], [132.13, 29.0, 201.0], atol=0.05),
            str(np.round(b.bounds[1] - b.bounds[0], 2)))
-    for nom, m in (("b_front", f), ("b_back", b), ("roue", w), ("pneu", t)):
+    for nom, m in (("b_front", f), ("b_back", b),
+                   ("roue panse", roues["panse"]), ("roue spine", roues["spine"]),
+                   ("pneu", t)):
         report("%s watertight" % nom, bool(m.is_watertight),
                "volume %.2f cm3" % (float(m.volume) / 1000.0))
 
@@ -92,15 +97,31 @@ def main():
         hit = min(xs, key=lambda x: abs(x - attendu)) if xs else None
         report("bouche du tube %s" % nom, hit is not None and proche(hit, attendu, 0.35),
                "mesuré %s, cotes %.2f" % (None if hit is None else round(hit, 2), attendu))
-    # Le moyeu (HUB_L) doit entrer : bouche → épaulement ≥ longueur engagée.
+    # Chaque moyeu entre dans SON alésage, avec le même jeu d'épaulement.
+    piles = {"panse": cotes.PILE_PANSE, "spine": cotes.PILE_SPINE}
     for nom, sh, bo in (("panse", sh_p, bo_p), ("spine", sh_s, bo_s)):
-        # panse : la bouche est à gauche de l'épaulement (x plus petit)
         profondeur = abs(sh - bo)
-        engage = cotes.PILE["u_mouth"] - cotes.HUB_TIP_U
+        engage = piles[nom]["engagement"]
+        jeu = profondeur - engage
         report("alésage %s contient le moyeu" % nom,
-               profondeur + 0.15 >= engage and profondeur < engage + 1.2,
-               "profondeur %.2f, moyeu engagé %.2f, jeu épaulement %.2f"
-               % (profondeur, engage, cotes.HUB_TIP_U - cotes.SHOULDER_U))
+               abs(jeu - (cotes.HUB_TIP_U - cotes.SHOULDER_U)) < 0.25
+               and engage > piles[nom]["pocket_depth"] + 1.5,
+               "profondeur %.2f, engagé %.2f, jeu %.2f, empreinte %.2f"
+               % (profondeur, engage, jeu, piles[nom]["pocket_depth"]))
+    # Voie : la bouche plus le jeu de disque plus la largeur de jante.
+    # L'entraxe des faces doit rester celui du montage à tubes égaux.
+    face_g = bo_p - (cotes.WHEEL_GAP + cotes.WHEEL_W)
+    face_d = bo_s + (cotes.WHEEL_GAP + cotes.WHEEL_W)
+    _fg, _fd, mid_c, ent_c = cotes.roues_apres_miroir()
+    report("entraxe des faces = montage symétrique",
+           proche(face_d - face_g, cotes.ENTRAXE_SYM_MM, 0.40)
+           and proche(face_d - face_g, ent_c, 0.40),
+           "mesuré %.2f, cotes %.2f, symétrique %.2f"
+           % (face_d - face_g, ent_c, cotes.ENTRAXE_SYM_MM))
+    report("milieu des roues sur le glyphe",
+           proche((face_g + face_d) / 2.0, cotes.GW / 2.0, 0.40)
+           and abs(mid_c - cotes.GW / 2.0) < 1e-6,
+           "mesuré %.2f, glyphe %.2f" % ((face_g + face_d) / 2.0, cotes.GW / 2.0))
 
     print("=== trou d'axe et capot oblong ===")
     # Axe : le cylindre Ø12,4 est vide. y=0,5 évite le plan de joint.
@@ -150,70 +171,66 @@ def main():
     report("semelle spine sous l'enveloppe servo", dalle(zs),
            "x=%.1f z=%s" % (x_sem_s, [round(z, 2) for z in zs[:8]]))
 
-    print("=== roue : moyeu, empreinte, allègement ===")
-    zi = float(w.bounds[1][2])
-    z0 = float(w.bounds[0][2])
-    report("longueur de moyeu",
-           proche(zi - cotes.WHEEL_W, cotes.HUB_L, 0.12) and abs(z0) < 0.05,
-           "bout z=%.2f, HUB_L cotes %.2f" % (zi, cotes.HUB_L))
-    # (8, 0) : dans le bras de la croix (demi-longueur 10,35), hors alésage, dans le capot.
-    # La croix est plus profonde que le capot : le fond mesuré est celui de l'empreinte.
-    zs = rayon(w, [8.0, 0.0, -2.0], [0, 0, 1])
-    fond = max((z for z in zs if z < zi - 0.3), default=None)
-    report("fond d'empreinte en croix",
-           fond is not None and proche(zi - fond, cotes.PILE["pocket_depth"], 0.2),
-           "z=%s, profondeur %s (cotes %.2f)" % (
-               [round(z, 2) for z in zs], None if fond is None else round(zi - fond, 2),
-               cotes.PILE["pocket_depth"]))
-    # (4, 4) : hors de la croix (largeur 2,95), dans la cavité ronde du capot.
-    zs = rayon(w, [4.0, 4.0, -2.0], [0, 0, 1])
-    fond = max((z for z in zs if z < zi - 0.2), default=None)
-    report("cavité ronde du capot",
-           fond is not None and proche(zi - fond, cotes.PILE["cap_cavity_depth"], 0.2),
-           "z=%s, profondeur %s (cotes %.2f)" % (
-               [round(z, 2) for z in zs], None if fond is None else round(zi - fond, 2),
-               cotes.PILE["cap_cavity_depth"]))
-    # (0, 0) : alésage borgne. La gravure ₿ enlève le premier millimètre au centre.
-    zs = rayon(w, [0.0, 0.0, -2.0], [0, 0, 1])
-    plein = [z for z in zs if 0.5 < z < zi - 0.2]
-    report("alésage d'arbre borgne",
-           len(plein) >= 2 and proche(zi - max(plein), cotes.PILE["shaft_bore_depth"], 0.25)
-           and min(plein) > 0.4,
-           "matière z=%s (la face ₿ ne doit pas être percée)" % [round(z, 2) for z in zs])
-    # Bras à angle 0, poche à 30°.
-    zs = rayon(w, [28.0, 0.0, -2.0], [0, 0, 1])
-    report("bras plein (angle 0, r=28)",
-           zs and zs[-1] >= cotes.WHEEL_W - 0.4 and zs[0] < 0.4,
-           "z=%s" % [round(z, 2) for z in zs])
-    # 20° est dans le bras si celui-ci fait 44° (ancienne inversion) et dans
-    # la poche si le bras fait bien 16° (±8°).
-    a = math.radians(20.0)
-    zs = rayon(w, [25.0 * math.cos(a), 25.0 * math.sin(a), -2.0], [0, 0, 1])
-    report("poche large (20°, bras de 16°)",
-           zs and proche(max(z for z in zs if z < 4), cotes.SPOKE_Z0, 0.25)
-           and max(zs) <= cotes.SPOKE_Z0 + 0.3,
-           "z=%s" % [round(z, 2) for z in zs])
-    a = math.radians(30.0)
-    zs = rayon(w, [25.0 * math.cos(a), 25.0 * math.sin(a), -2.0], [0, 0, 1])
-    report("poche entre les bras (30°, r=25)",
-           zs and proche(max(z for z in zs if z < 4), cotes.SPOKE_Z0, 0.25)
-           and max(zs) <= cotes.SPOKE_Z0 + 0.3,
-           "z=%s (peau à %.1f)" % ([round(z, 2) for z in zs], cotes.SPOKE_Z0))
-    # Jante : le fond de gorge est à r = 39,5. Juste au-dessus, deux flasques.
-    zs = rayon(w, [0.0, 39.65, -2.0], [0, 0, 1])
-    report("gorge de pneu (deux flasques)",
-           len(zs) >= 4 and zs[1] < 1.2 and zs[-2] > cotes.WHEEL_W - 1.2,
-           "z=%s" % [round(z, 2) for z in zs])
+    print("=== roues : moyeu, empreinte, allègement ===")
 
-    vol = float(w.volume) / 1000.0
-    w.density = cotes.PETG_G_PER_CM3 * 1e-3          # g/mm³
-    izz = float(w.moment_inertia[2, 2]) * 1e-9       # g·mm² → kg·m²
-    masse = vol * cotes.PETG_G_PER_CM3
-    # Un disque plein faisait ~42,6 cm³ / ~54 g. On exige un allègement réel
-    # sans vider la jante (plancher : 20 cm³).
-    report("roue allégée (plus un disque plein)",
-           20.0 < vol < 40.0, "%.2f cm3, %.1f g PETG, Izz %.3e kg·m²" % (vol, masse, izz))
-    report("inertie d'axe imprimée", izz > 0.0, "%.3e kg·m² (le sim ignore cette masse)" % izz)
+    def controle_roue(nom, w, hub_l, pile):
+        zi = float(w.bounds[1][2])
+        z0 = float(w.bounds[0][2])
+        report("longueur de moyeu %s" % nom,
+               proche(zi - cotes.WHEEL_W, hub_l, 0.12) and abs(z0) < 0.05,
+               "bout z=%.2f, moyeu cotes %.2f" % (zi, hub_l))
+        # (8, 0) : dans le bras de la croix, hors alésage. Le fond mesuré
+        # est celui de l'empreinte (plus profond que la cavité du capot).
+        zs = rayon(w, [8.0, 0.0, -2.0], [0, 0, 1])
+        fond = max((z for z in zs if z < zi - 0.3), default=None)
+        report("empreinte %s" % nom,
+               fond is not None and proche(zi - fond, pile["pocket_depth"], 0.2),
+               "profondeur %s (cotes %.2f)" % (
+                   None if fond is None else round(zi - fond, 2), pile["pocket_depth"]))
+        zs = rayon(w, [4.0, 4.0, -2.0], [0, 0, 1])
+        fond = max((z for z in zs if z < zi - 0.2), default=None)
+        report("cavité capot %s" % nom,
+               fond is not None and proche(zi - fond, pile["cap_cavity_depth"], 0.2),
+               "profondeur %s (cotes %.2f)" % (
+                   None if fond is None else round(zi - fond, 2), pile["cap_cavity_depth"]))
+        zs = rayon(w, [0.0, 0.0, -2.0], [0, 0, 1])
+        plein = [z for z in zs if 0.5 < z < zi - 0.2]
+        report("alésage borgne %s" % nom,
+               len(plein) >= 2 and proche(zi - max(plein), pile["shaft_bore_depth"], 0.25)
+               and min(plein) > 0.4,
+               "matière z=%s" % [round(z, 2) for z in zs])
+        zs = rayon(w, [28.0, 0.0, -2.0], [0, 0, 1])
+        report("bras %s (angle 0)" % nom,
+               bool(zs) and zs[-1] >= cotes.WHEEL_W - 0.4 and zs[0] < 0.4,
+               "z=%s" % [round(z, 2) for z in zs])
+        a = math.radians(20.0)
+        zs = rayon(w, [25.0 * math.cos(a), 25.0 * math.sin(a), -2.0], [0, 0, 1])
+        report("poche 20° %s" % nom,
+               bool(zs) and proche(max(z for z in zs if z < 4), cotes.SPOKE_Z0, 0.25)
+               and max(zs) <= cotes.SPOKE_Z0 + 0.3,
+               "z=%s" % [round(z, 2) for z in zs])
+        zs = rayon(w, [0.0, 39.65, -2.0], [0, 0, 1])
+        report("gorge %s" % nom,
+               len(zs) >= 4 and zs[1] < 1.2 and zs[-2] > cotes.WHEEL_W - 1.2,
+               "z=%s" % [round(z, 2) for z in zs])
+        vol = float(w.volume) / 1000.0
+        w.density = cotes.PETG_G_PER_CM3 * 1e-3
+        izz = float(w.moment_inertia[2, 2]) * 1e-9
+        report("roue %s allégée" % nom,
+               20.0 < vol < 40.0,
+               "%.2f cm3, %.1f g, Izz %.3e" % (vol, vol * cotes.PETG_G_PER_CM3, izz))
+        return vol
+
+    vol_p = controle_roue("panse", roues["panse"], cotes.HUB_PANSE, cotes.PILE_PANSE)
+    vol_s = controle_roue("spine", roues["spine"], cotes.HUB_SPINE, cotes.PILE_SPINE)
+    d_l = cotes.HUB_PANSE - cotes.HUB_SPINE
+    d_v = math.pi * (cotes.HUB_D / 2.0) ** 2 * d_l / 1000.0
+    # Les vides (empreinte, capot, arbre) ont la même profondeur depuis le
+    # bout : l'écart de volume est un cylindre plein de longueur delta.
+    report("écart de volume = cylindre de moyeu",
+           abs((vol_p - vol_s) - d_v) < 0.20,
+           "mesuré %.2f cm3, cylindre Ø%.0f × %.2f = %.2f cm3"
+           % (vol_p - vol_s, cotes.HUB_D, d_l, d_v))
 
     print("=== pneu ===")
     report("pneu Ø83 × 7",

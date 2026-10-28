@@ -10,7 +10,7 @@
 #  Sol z = 0 ; axe des roues z = WHEEL_R (rayon de roulement avec pneu).
 #
 #  Impression : b_front / b_back COUCHÉES (face externe sur le plateau, cavités
-#  vers le haut), coin_wheel face externe en bas, pneu TPU à plat. Zéro support.
+#  vers le haut), roues face ₿ en bas (panse et spine, deux STL), pneu à plat.
 # =============================================================================
 import math, os, sys
 import bmesh, bpy
@@ -65,7 +65,8 @@ WHEEL_R = cotes.WHEEL_R
 AXLE_Z = cotes.AXLE_Z
 HUB_BORE_D = cotes.HUB_BORE_D
 HORN_ARM_W, HORN_ARM_L, HORN_T = cotes.HORN_ARM_W, cotes.HORN_ARM_L, cotes.HORN_T
-HUB_D, HUB_L = cotes.HUB_D, cotes.HUB_L
+HUB_D = cotes.HUB_D
+HUB_PANSE, HUB_SPINE = cotes.HUB_PANSE, cotes.HUB_SPINE
 BEAR_D, BEAR_WALL = cotes.BEAR_D, cotes.BEAR_WALL
 WHEEL_GAP = cotes.WHEEL_GAP
 assert (GW, WALL, SV_BOSS_D, SV_BOSS_H, SV_SHAFT_D) == (
@@ -355,17 +356,15 @@ def build_body():
         booleen(shelf, glyph_solids(y_cav_b - 1, y_cav_f + 1, inset=WALL - 0.4), 'INTERSECT')
         semelles.append(shelf)
     # ── Tubes-paliers EXTERNES (coaxiaux, z = AXLE_Z, y = 0).
-    #    MÊME longueur des deux côtés : une seule roue (même moyeu) s'enfile
-    #    des deux côtés. La voie N'EST PAS centrée sur le glyphe : la peau de
-    #    la panse, à hauteur d'axe, est en retrait de ~11 mm par rapport à
-    #    x = GW, alors que le spine est à x = 0. Milieu des axes ≈ 53,4 mm,
-    #    centre du glyphe = 59 mm (écart ≈ −5,6 mm). Allonger un seul tube
-    #    pour recentrer demanderait deux moyeux différents, ou de toucher
-    #    l'enveloppe. Le commentaire « −11 mm » était une arithmétique fausse
-    #    (TUBE vaut ~12,1 mm, pas 11). Détail : cotes.milieu_axes().
-    TUBE = cotes.TUBE_LEN
-    x_in_R = x_wall_R + TUBE                      # = GW + WHEEL_GAP
-    x_in_L = -TUBE
+    #    Recentrage APPLIQUÉ (cotes.proposition_recentrage, applique=True).
+    #    Les peaux restent où elles sont (milieu ≈ 53,4 mm, glyphe à 59).
+    #    Le tube panse (ici +X, avant miroir) est allongé de delta, le tube
+    #    spine raccourci d'autant. La somme ne change pas : la boîte des
+    #    coques et la voie des pneus non plus. Deux moyeux, deux STL.
+    #    L'ancien « −11 mm » était une arithmétique fausse sur la longueur
+    #    de tube, pas un décalage. Détail : chassis/RECENTRAGE.md.
+    x_in_R = x_wall_R + cotes.TUBE_PANSE
+    x_in_L = -cotes.TUBE_SPINE
     # Ancrage 1,4 mm dans la paroi (union franche, sans entrer dans la baie).
     # Ø ext 26,5 → bas du tube à AXLE_Z − 13,25 ≈ 28,8 > plancher de cavité.
     tube_R = cylindre('tubeR', BEAR_D + 2*BEAR_WALL, (x_in_R + cotes.TUBE_OVER) - (x_wall_R - 1.4), 'X', (((x_in_R + cotes.TUBE_OVER) + (x_wall_R - 1.4))/2, 0.0, AXLE_Z))
@@ -584,8 +583,13 @@ def _secteur(nom, r0, r1, a0, a1, z0, z1, n=8):
     return ob
 
 
-def build_wheel():
+def build_wheel(hub_l, nom):
     """Roue-pièce ₿ Ø80 × WHEEL_W. Face externe z=0 (₿ gravé 1 mm, sur le plateau).
+
+    ``hub_l`` est la longueur de moyeu de CE côté (panse ou spine).
+    L'empreinte, la cavité de capot et l'alésage d'arbre partent du bout
+    du moyeu : leur profondeur ne dépend pas de ``hub_l``, tant que le
+    moyeu court les contient (cotes._verifier_pile).
 
     Six poches ouvertes côté moyeu allègent le disque sans trouer la face :
     le simulateur néglige la masse des roues, donc un disque plein (~54 g)
@@ -600,7 +604,7 @@ def build_wheel():
         palonnier sur le servo, puis on enfile la roue.
     Les cotes et les jeux sont dans chassis/cotes.py.
     """
-    disk = cylindre('coin_wheel', WHEEL_D, WHEEL_W, 'Z', (0, 0, WHEEL_W/2), 128)
+    disk = cylindre(nom, WHEEL_D, WHEEL_W, 'Z', (0, 0, WHEEL_W/2), 128)
     ring_out = cylindre('ring_o', WHEEL_D - 3.0, 0.8 + EPS, 'Z', (0, 0, 0.4 - EPS), 128)
     ring_in  = cylindre('ring_i', WHEEL_D - 6.0, 1.0, 'Z', (0, 0, 0.4), 128)
     booleen(ring_out, ring_in, 'DIFFERENCE'); booleen(disk, ring_out, 'DIFFERENCE')
@@ -628,10 +632,11 @@ def build_wheel():
                                cotes.SPOKE_Z0, WHEEL_W + EPS))
     soustraire(disk, poches)
     # moyeu-tube côté interne
-    hub = cylindre('hub', HUB_D, HUB_L + EPS, 'Z', (0, 0, WHEEL_W + HUB_L/2), 96)
+    hub = cylindre('hub', HUB_D, hub_l + EPS, 'Z', (0, 0, WHEEL_W + hub_l/2), 96)
     booleen(disk, hub, 'UNION')
-    zi = WHEEL_W + HUB_L                  # bout du moyeu (côté servo)
-    p = cotes.PILE
+    zi = WHEEL_W + hub_l                  # bout du moyeu (côté servo)
+    # Les profondeurs d'empreinte sont les mêmes des deux côtés.
+    p = cotes.PILE_PANSE
     outils = []
     # cavité du capot (ronde : la roue tourne autour d'un capot fixe)
     cd = p['cap_cavity_depth']
@@ -694,26 +699,23 @@ def rendu(objets_mats, chemin, vue='face'):
     sc.render.filepath = chemin; bpy.ops.render.render(write_still=True)
     print(f"  [PNG] {os.path.basename(chemin)}")
 
-def assemblage_pour_rendu(front, back, wheel, tire):
-    """Copies posées à leur place. ``xL`` / ``xR`` sont les BOUTS de moyeu après miroir."""
-    # Bouts de moyeu (pas les faces externes). Voir cotes.roues_apres_miroir.
+def assemblage_pour_rendu(front, back, roue_panse, roue_spine, tire):
+    """Copies posées à leur place. Les origines sont les faces externes."""
     face_g, face_d, _milieu, _ent = cotes.roues_apres_miroir()
-    long = WHEEL_W + HUB_L
-    xL, xR = face_g + long, face_d - long
     O = _mat('orange', (0.97, 0.58, 0.10, 1)); D = _mat('dark', (0.10, 0.10, 0.11, 1), 0.6); T = _mat('tpu', (0.16, 0.16, 0.16, 1), 0.9)
     objs = [(front, O), (back, O)]
-    for sx, xw in ((-1, xL), (1, xR)):
-        w = dupliquer(wheel, f'wheel{sx}'); t = dupliquer(tire, f'tire{sx}')
-        # roue locale : axe Z, face externe z=0, disque z∈[0, WHEEL_W], moyeu ensuite.
-        # Le bout du moyeu (z = WHEEL_W + HUB_L) va au plan xw.
-        # pneu local : z∈[0, TIRE_W] → centré sur le disque : décalage (WHEEL_W − TIRE_W)/2
-        dt = (WHEEL_W - TIRE_W)/2
-        if sx < 0:   # +Z local → +X : rot +90° ; z=23 local → x = origine + 23 = xw → origine = xw − 23
-            w.matrix_world = Matrix.Translation((xw - (WHEEL_W + HUB_L), 0, AXLE_Z)) @ Matrix.Rotation(math.radians(90), 4, 'Y')
-            t.matrix_world = Matrix.Translation((xw - (WHEEL_W + HUB_L) + dt, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(90), 4, 'Y')
-        else:        # +Z local → −X : rot −90° ; z=23 local → x = origine − 23 = xw → origine = xw + 23
-            w.matrix_world = Matrix.Translation((xw + (WHEEL_W + HUB_L), 0, AXLE_Z)) @ Matrix.Rotation(math.radians(-90), 4, 'Y')
-            t.matrix_world = Matrix.Translation((xw + (WHEEL_W + HUB_L) - dt, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(-90), 4, 'Y')
+    dt = (WHEEL_W - TIRE_W)/2
+    # panse = x petit, moyeu long, +Z local vers +X. spine = x grand.
+    for wheel, face, sens, nom in (
+            (roue_panse, face_g, +1, 'panse'),
+            (roue_spine, face_d, -1, 'spine')):
+        w = dupliquer(wheel, 'wheel_' + nom); t = dupliquer(tire, 'tire_' + nom)
+        if sens > 0:
+            w.matrix_world = Matrix.Translation((face, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(90), 4, 'Y')
+            t.matrix_world = Matrix.Translation((face + dt, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(90), 4, 'Y')
+        else:
+            w.matrix_world = Matrix.Translation((face, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(-90), 4, 'Y')
+            t.matrix_world = Matrix.Translation((face - dt, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(-90), 4, 'Y')
         objs += [(w, D), (t, T)]
     return objs
 
@@ -721,7 +723,8 @@ def assemblage_pour_rendu(front, back, wheel, tire):
 def miroir_x(ob):
     """Le glyphe est construit avec le spine en x=0 (à gauche dans le repère), mais vu de FACE (+Y vers -Y)
     x croît vers la gauche de l'observateur → le ₿ apparaîtrait en miroir. On retourne le corps en X
-    (x → GW - x) pour que le ₿ se lise correctement de face. Appliqué aux 2 coques (roues symétriques : inchangées)."""
+    (x → GW - x) pour que le ₿ se lise correctement de face. Appliqué aux 2 coques.
+    Les roues ne sont pas miroirées : chacune a son STL (moyeu long côté panse)."""
     bpy.context.view_layer.objects.active = ob; bpy.ops.object.select_all(action='DESELECT'); ob.select_set(True)
     ob.matrix_world = Matrix.Translation((GW, 0, 0)) @ Matrix.Scale(-1, 4, (1, 0, 0)) @ ob.matrix_world
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
@@ -738,12 +741,14 @@ def main():
     miroir_x(front); miroir_x(back)
     exporter(front, os.path.join(OUT, 'b_front.stl'))
     exporter(back, os.path.join(OUT, 'b_back.stl'))
-    w = build_wheel(); exporter(w, os.path.join(OUT, 'coin_wheel.stl'))
+    wp = build_wheel(cotes.HUB_PANSE, 'coin_wheel_panse')
+    exporter(wp, os.path.join(OUT, 'coin_wheel_panse.stl'))
+    ws = build_wheel(cotes.HUB_SPINE, 'coin_wheel_spine')
+    exporter(ws, os.path.join(OUT, 'coin_wheel_spine.stl'))
     t = build_tire(); exporter(t, os.path.join(OUT, 'coin_tire.stl'))
     if '--preview' in sys.argv:
-        objs = assemblage_pour_rendu(front, back, w, t)
-        # les originaux roue/pneu restent à l'origine : on les cache
-        w.hide_render = True; t.hide_render = True
+        objs = assemblage_pour_rendu(front, back, wp, ws, t)
+        wp.hide_render = True; ws.hide_render = True; t.hide_render = True
         rendu(objs, os.path.join(OUT, 'preview_front.png'), 'face')
         rendu(objs, os.path.join(OUT, 'preview_iso.png'), 'iso')
         # intérieur : coque arrière seule vue du plan de joint (aménagements), coque avant seule vue de dos

@@ -62,8 +62,11 @@
   var TILT_PER_CMD = 0.06;                  // kTiltPerCmd  : ° de consigne par unité de cmdForward
   var TURN_PER_CMD = 0.30;                  // kTurnPerCmd  : unités de sortie par unité de cmdTurn
   var CMD_SLEW_PER_S = 200.0;               // kCmdSlewPerS : lissage des consignes (unités/s)
-  // Voie des roues (m), plans médians des pneus : faces externes à 146,87 mm
-  // (exporter_parts_web.py TRACK), pneu centré 4 mm en dedans → 138,87 mm.
+  // Voie des roues (m), plans médians des pneus. Le 0,13887 vient d'un
+  // entraxe de faces de 146,87 mm (pneu centré 4 mm en dedans). Les STL
+  // d'aujourd'hui ont les faces à 150,13 mm ; le recentrage sur le glyphe
+  // déplace le milieu sans changer cet entraxe. On ne recalcule pas ce
+  // littéral : selfcheck.js l'exige au bit, des deux langages.
   // Sert UNIQUEMENT à la cinématique du lacet — le firmware n'a ni cap ni
   // odométrie (head.cpp l.10-15) : le lacet est une grandeur du SIMULATEUR
   // (pour voir le pivot), pas une grandeur du robot.

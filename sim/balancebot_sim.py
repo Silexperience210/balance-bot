@@ -105,12 +105,12 @@ TURN_PER_CMD = 0.30                  # kTurnPerCmd  : unités de sortie par unit
 CMD_SLEW_PER_S = 200.0               # kCmdSlewPerS : lissage des consignes (unités/s)
 # Voie FIGÉE des plans médians de pneu (m), pour le lacet du simulateur.
 # Historique : faces externes à 146,87 mm, pneu centré 4 mm en dedans
-# → 138,87 mm. Le châssis courant a des faces plus écartées (moyeu qui
-# entre vraiment, cotes.roues_apres_miroir) : on NE met PAS à jour ce
-# nombre. selfcheck.js compare la trajectoire à 1e-12 près. Le firmware
-# n'a ni cap ni odométrie : le lacet est une grandeur du simulateur.
-# Le rayon dynamique R = 0,0415 (plus haut) a le même statut. L'axe
-# géométrique du châssis, lui, est à 42,0 mm.
+# → 138,87 mm. Les faces STL sont à 150,13 mm (cotes.ENTRAXE_SYM_MM).
+# Le recentrage sur le glyphe déplace le milieu, pas cet entraxe : on
+# NE met PAS à jour ce nombre. selfcheck.js le compare au bit. Le
+# firmware n'a ni cap ni odométrie : le lacet est une grandeur du
+# simulateur. Le rayon dynamique R = 0,0415 a le même statut. L'axe
+# géométrique du châssis est à 42,0 mm.
 TRACK = 0.13887
 
 

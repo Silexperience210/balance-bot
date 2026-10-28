@@ -55,6 +55,7 @@ def analyse(path, down_axis, down_sign, top=8):
 res = [
     analyse(os.path.join(V3, "b_front.stl"), 1, +1),
     analyse(os.path.join(V3, "b_back.stl"), 1, -1),
-    analyse(os.path.join(V3, "coin_wheel.stl"), 2, +1),
+    analyse(os.path.join(V3, "coin_wheel_panse.stl"), 2, +1),
+    analyse(os.path.join(V3, "coin_wheel_spine.stl"), 2, +1),
 ]
 print(json.dumps(res, indent=1))

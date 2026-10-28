@@ -145,69 +145,126 @@ def x_wall_panse(z=AXLE_Z):
 
 
 X_WALL_R = x_wall_panse()
-# Longueur de tube AU-DELÀ de la peau, identique des deux côtés (une seule
-# roue imprimée). Le côté panse s'arrête à x = GW + WHEEL_GAP : c'est ce
-# qui fige le débord, donc la boîte englobante du corps.
-TUBE_LEN = (GW + WHEEL_GAP) - X_WALL_R
+# Longueur de tube AU-DELÀ de la peau si les deux côtés étaient égaux.
+# C'est la référence qui figeait le débord panse à x = GW + WHEEL_GAP, et
+# donc la largeur de la boîte du corps. On ne la réécrit pas : le
+# recentrage ajoute et retire la même longueur, la somme (et la boîte)
+# reste celle-ci.
+TUBE_LEN_SYM = (GW + WHEEL_GAP) - X_WALL_R
 
 
-def _pile():
-    """Cotes dérivées. ``u`` depuis la face servo."""
+def _delta_recentrage():
+    """Décalage des peaux vers le spine, à compenser par les tubes.
+
+    Les peaux ne bougent pas (panse ronde). Le milieu des peaux, avant
+    miroir, est à ``X_WALL_R / 2``. Le centre du glyphe est ``GW / 2``.
+    Allonger la panse de ``delta`` et raccourcir le spine de ``delta``
+    déplace le milieu des roues de ``delta`` sans changer leur écart.
+    """
+    dec = X_WALL_R / 2.0 - GW / 2.0
+    return -dec
+
+
+DELTA_RECENTRAGE = _delta_recentrage()
+# APPLIQUÉ. Deux STL : le moyeu suit le tube, l'empreinte (repère u depuis
+# la face servo) ne change pas.
+TUBE_PANSE = TUBE_LEN_SYM + DELTA_RECENTRAGE
+TUBE_SPINE = TUBE_LEN_SYM - DELTA_RECENTRAGE
+
+
+def pile(tube_len):
+    """Cotes dérivées d'un côté. ``u`` depuis la face servo."""
     u_skin = WALL
-    u_mouth = u_skin + TUBE_LEN + TUBE_OVER          # bout RÉEL du tube
+    u_mouth = u_skin + tube_len + TUBE_OVER          # bout RÉEL du tube
     u_disk = u_mouth + WHEEL_GAP                     # face interne du disque
     hub_l = u_disk - HUB_TIP_U
     bore_depth = u_mouth - SHOULDER_U                # du bout du tube à l'épaulement
+    engagement = u_mouth - HUB_TIP_U                 # longueur de moyeu dans le palier
     return dict(
+        tube_len=tube_len,
         u_skin=u_skin, u_mouth=u_mouth, u_disk=u_disk,
-        hub_l=hub_l, bore_depth=bore_depth,
+        hub_l=hub_l, bore_depth=bore_depth, engagement=engagement,
         pocket_depth=POCKET_FLOOR_U - HUB_TIP_U,
         cap_cavity_depth=CAP_CAVITY_U - HUB_TIP_U,
         shaft_bore_depth=SHAFT_BORE_U - HUB_TIP_U,
     )
 
 
-PILE = _pile()
-HUB_L = PILE["hub_l"]
+PILE_PANSE = pile(TUBE_PANSE)
+PILE_SPINE = pile(TUBE_SPINE)
+HUB_PANSE = PILE_PANSE["hub_l"]
+HUB_SPINE = PILE_SPINE["hub_l"]
 
 
 def _verifier_pile():
     """Échoue tout de suite si une cote dérivée se contredit."""
-    p = PILE
     erreurs = []
     if not (0.8 < SHOULDER_U < WALL):
         erreurs.append("épaulement hors de la paroi (u=%.2f, paroi %.2f)" % (SHOULDER_U, WALL))
-    if HUB_TIP_U - SHOULDER_U < 0.30:
+    jeu = HUB_TIP_U - SHOULDER_U
+    if jeu < 0.30:
         erreurs.append("jeu bout de moyeu / épaulement < 0,30 mm")
+    if abs(jeu - HUB_END_CLEAR) > 1e-9:
+        erreurs.append("jeu d'épaulement n'est plus %.2f mm" % HUB_END_CLEAR)
     if HORN_ON_BOSS - SHOULDER_U < 0.40:
         erreurs.append("palonnier datasheet trop près de l'épaulement")
     if HUB_TIP_U > CAP_H + 0.15:
-        # le moyeu doit s'arrêter avant le dessus du capot de 4 mm,
-        # sinon il tape dedans quand le capot est présent
         erreurs.append("le moyeu rencontre le capot de 4 mm")
     if CAP_REACH + 0.2 > BEAR_D / 2:
         erreurs.append("le capot ne passe pas dans l'alésage Ø%.1f" % BEAR_D)
-    if p["hub_l"] <= 0 or p["pocket_depth"] <= HORN_T:
-        erreurs.append("moyeu ou empreinte dégénérés")
-    if p["bore_depth"] < (p["u_mouth"] - HUB_TIP_U) + HUB_END_CLEAR - 1e-6:
-        erreurs.append("alésage plus court que le moyeu")
-    # le moyeu s'arrête HUB_END_CLEAR avant l'épaulement : il entre.
-    if (p["u_mouth"] - HUB_TIP_U) > p["bore_depth"] - 0.2:
-        erreurs.append("le moyeu talonne l'épaulement")
     if POCKET_FLOOR_U < HORN_ON_CAP + HORN_T:
         erreurs.append("empreinte trop courte pour le palonnier sur capot")
     if HORN_ON_BOSS + 0.2 < HUB_TIP_U:
         erreurs.append("palonnier datasheet sort du moyeu")
-    # La pointe d'arbre datasheet (6,0) doit dépasser le dos du palonnier
-    # posé sur le capot : engagement mini annoncé, pas garanti au réel.
     if SHAFT_TIP_U - HORN_ON_CAP < 1.5:
         erreurs.append("engagement d'arbre < 1,5 mm dans le cas capot")
     rayon_coin = math.hypot(CAP_Z_LONG, CAP_HALF_Y)
     if rayon_coin > BEAR_D / 2 - 0.4:
         erreurs.append("coin du capot hors de l'alésage (r=%.2f)" % rayon_coin)
+    if TUBE_SPINE < 5.0 or TUBE_PANSE < TUBE_SPINE:
+        erreurs.append("tube spine trop court ou plus long que la panse")
+    # La somme des tubes est celle du montage symétrique : la voie et la
+    # largeur de boîte des coques ne bougent pas.
+    if abs((TUBE_PANSE + TUBE_SPINE) - 2 * TUBE_LEN_SYM) > 1e-9:
+        erreurs.append("la somme des tubes a changé")
+    for nom, p in (("panse", PILE_PANSE), ("spine", PILE_SPINE)):
+        if p["hub_l"] <= p["pocket_depth"] + 2.5:
+            erreurs.append("%s : le moyeu ne couvre pas l'empreinte (%.2f ≤ %.2f)"
+                           % (nom, p["hub_l"], p["pocket_depth"]))
+        if p["hub_l"] <= p["shaft_bore_depth"] + 2.0:
+            erreurs.append("%s : l'alésage d'arbre mange le disque" % nom)
+        if p["engagement"] <= p["pocket_depth"] + 2.0:
+            erreurs.append("%s : l'empreinte dépasse la bouche du tube" % nom)
+        if p["bore_depth"] < p["engagement"] + HUB_END_CLEAR - 1e-6:
+            erreurs.append("%s : alésage plus court que le moyeu" % nom)
+        if p["engagement"] > p["bore_depth"] - 0.2:
+            erreurs.append("%s : le moyeu talonne l'épaulement" % nom)
+        if abs(p["pocket_depth"] - (POCKET_FLOOR_U - HUB_TIP_U)) > 1e-9:
+            erreurs.append("%s : empreinte dérivée" % nom)
+    if abs(PILE_PANSE["pocket_depth"] - PILE_SPINE["pocket_depth"]) > 1e-9:
+        erreurs.append("les deux empreintes ne font plus la même profondeur")
     if erreurs:
         raise SystemExit("cotes.py incohérent :\n  - " + "\n  - ".join(erreurs))
 
+
+def _faces(tube_panse, tube_spine):
+    """Faces externes après miroir pour deux longueurs de tube."""
+    def hub(tube):
+        return pile(tube)["hub_l"]
+    long_p = WHEEL_W + hub(tube_panse)
+    long_s = WHEEL_W + hub(tube_spine)
+    tip_panse = (X_WALL_R - WALL) + HUB_TIP_U
+    tip_spine = WALL - HUB_TIP_U
+    tip_g = GW - tip_panse
+    tip_d = GW - tip_spine
+    face_g = tip_g - long_p
+    face_d = tip_d + long_s
+    return face_g, face_d, (face_g + face_d) / 2.0, face_d - face_g
+
+
+# Entraxe des faces externes du montage symétrique (avant recentrage).
+# Le recentrage doit le reproduire au nanomètre : c'est la voie des pneus.
+_g0, _d0, _m0, ENTRAXE_SYM_MM = _faces(TUBE_LEN_SYM, TUBE_LEN_SYM)
 
 _verifier_pile()
 
@@ -215,42 +272,48 @@ _verifier_pile()
 def roues_apres_miroir():
     """Faces externes des roues après le miroir ``x → GW − x``.
 
-    Gauche (x petit) = panse, droite (x grand) = spine, ₿ lu de face.
-    Retourne ``(x_gauche, x_droite, x_milieu, entraxe)`` en mm.
+    Gauche (x petit) = panse, moyeu long. Droite (x grand) = spine, moyeu
+    court. ₿ lu de face. Retourne ``(x_gauche, x_droite, x_milieu, entraxe)``.
     """
-    long = WHEEL_W + HUB_L
-    # avant miroir : panse à +X, spine à x = 0
-    tip_panse = (X_WALL_R - WALL) + HUB_TIP_U
-    tip_spine = WALL - HUB_TIP_U
-    tip_g = GW - tip_panse          # panse, à gauche après miroir
-    tip_d = GW - tip_spine          # spine, à droite après miroir
-    face_g = tip_g - long           # l'extérieur est vers −X
-    face_d = tip_d + long           # l'extérieur est vers +X
-    milieu = (face_g + face_d) / 2
-    return face_g, face_d, milieu, face_d - face_g
+    return _faces(TUBE_PANSE, TUBE_SPINE)
 
 
 def epaulements_apres_miroir():
     """x de l'épaulement (fond de l'alésage Ø palier) après miroir.
 
     Retourne ``(panse, spine)``. La panse est à gauche (x petit).
+    Les épaulements ne bougent pas avec le recentrage : ils sont dans la paroi.
     """
-    sh_panse = (X_WALL_R - WALL) + SHOULDER_U     # d = −1 : u vers −X avant miroir
+    sh_panse = (X_WALL_R - WALL) + SHOULDER_U
     sh_spine = WALL - SHOULDER_U
     return GW - sh_panse, GW - sh_spine
 
 
 def bouches_tube_apres_miroir():
     """x du bout réel du tube (TUBE_OVER compris) après miroir. ``(panse, spine)``."""
-    bouche_panse = X_WALL_R + TUBE_LEN + TUBE_OVER
-    bouche_spine = -(TUBE_LEN + TUBE_OVER)
+    bouche_panse = X_WALL_R + TUBE_PANSE + TUBE_OVER
+    bouche_spine = -(TUBE_SPINE + TUBE_OVER)
     return GW - bouche_panse, GW - bouche_spine
 
 
 def milieu_axes():
-    """Milieu des deux sorties d'axe (peaux externes), avant miroir, et
-    l'écart au centre du glyphe (GW/2). Négatif = décalé vers le spine."""
-    milieu = X_WALL_R / 2.0         # peaux à x = 0 et x = X_WALL_R
+    """Milieu des deux PEAUX à hauteur d'axe, avant miroir, et l'écart au
+    centre du glyphe (GW/2). Négatif = décalé vers le spine.
+
+    Les peaux ne bougent pas quand on recentre : ce n'est pas le milieu
+    des roues. Voir ``milieu_roues``.
+    """
+    milieu = X_WALL_R / 2.0
+    return milieu, milieu - GW / 2.0
+
+
+def milieu_roues():
+    """Milieu des faces externes après miroir, et l'écart à GW/2.
+
+    Après recentrage l'écart est nul. L'entraxe, lui, reste
+    ``ENTRAXE_SYM_MM``.
+    """
+    _g, _d, milieu, _e = roues_apres_miroir()
     return milieu, milieu - GW / 2.0
 
 
@@ -269,50 +332,81 @@ def ecran_viewer():
 
 
 def proposition_recentrage():
-    """Option NON APPLIQUÉE : amener le milieu des axes sur le centre du glyphe.
+    """Recentrage APPLIQUÉ : milieu des roues sur le centre du glyphe.
 
-    Les peaux ne bougent pas. On allonge le tube de la panse de ``delta``
-    et on raccourcit celui du spine de la même quantité : la voie des
-    pneus ne change pas, le milieu se déplace de ``delta``. Deux longueurs
-    de moyeu, donc deux STL de roue. Le générateur ne lit pas ce dict.
-
-    ``delta`` est la moitié de l'écart actuel (milieu des peaux → GW/2),
-    parce que les deux tubes bougent en sens inverse.
+    Les peaux ne bougent pas. Le tube et le moyeu de la panse sont plus
+    longs de ``delta``, ceux du spine plus courts de la même quantité.
+    ``applique`` est True : ``gen_bitcoin_bot.py`` lit ``TUBE_PANSE`` et
+    ``TUBE_SPINE``. Deux STL, ``coin_wheel_panse.stl`` et
+    ``coin_wheel_spine.stl``.
     """
-    _mil, dec = milieu_axes()
-    delta = -dec                         # mm, vers la panse, avant miroir
+    _mil, dec_peaux = milieu_axes()
+    _mr, dec_roues = milieu_roues()
+    _g, _d, _m, ent = roues_apres_miroir()
     return dict(
-        applique=False,
-        delta_mm=delta,
-        tube_panse_mm=TUBE_LEN + delta,
-        tube_spine_mm=TUBE_LEN - delta,
-        moyeu_panse_mm=HUB_L + delta,
-        moyeu_spine_mm=HUB_L - delta,
-        engagement_spine_mm=(PILE["u_mouth"] - HUB_TIP_U) - delta,
-        ecart_actuel_mm=dec,
+        applique=True,
+        delta_mm=DELTA_RECENTRAGE,
+        tube_panse_mm=TUBE_PANSE,
+        tube_spine_mm=TUBE_SPINE,
+        moyeu_panse_mm=HUB_PANSE,
+        moyeu_spine_mm=HUB_SPINE,
+        engagement_panse_mm=PILE_PANSE["engagement"],
+        engagement_spine_mm=PILE_SPINE["engagement"],
+        jeu_epaulement_mm=HUB_TIP_U - SHOULDER_U,
+        empreinte_mm=PILE_PANSE["pocket_depth"],
+        entraxe_faces_mm=ent,
+        entraxe_symetrique_mm=ENTRAXE_SYM_MM,
+        ecart_peaux_mm=dec_peaux,
+        ecart_roues_mm=dec_roues,
     )
+
+
+def _verifier_recentrage():
+    p = proposition_recentrage()
+    erreurs = []
+    if not p["applique"]:
+        erreurs.append("le recentrage doit être appliqué")
+    if abs(p["ecart_roues_mm"]) > 1e-6:
+        erreurs.append("milieu des roues encore décalé de %+.4f mm" % p["ecart_roues_mm"])
+    if abs(p["entraxe_faces_mm"] - p["entraxe_symetrique_mm"]) > 1e-6:
+        erreurs.append("la voie des faces a bougé (%.4f → %.4f)"
+                       % (p["entraxe_symetrique_mm"], p["entraxe_faces_mm"]))
+    if abs(p["entraxe_faces_mm"] - 150.1288) > 0.02:
+        # 150,13 mm : entraxe mesuré avant recentrage (tubes égaux).
+        # La tolérance est celle de l'arrondi d'affichage, pas un jeu.
+        erreurs.append("entraxe %.4f s'éloigne des 150,13 mm d'avant recentrage"
+                       % p["entraxe_faces_mm"])
+    if p["ecart_peaux_mm"] > -5.0:
+        erreurs.append("les peaux ont bougé (écart %+.2f)" % p["ecart_peaux_mm"])
+    if erreurs:
+        raise SystemExit("recentrage incohérent :\n  - " + "\n  - ".join(erreurs))
+
+
+_verifier_recentrage()
 
 
 def resume():
     """Texte court pour les journaux de génération."""
     g, d, mid, ent = roues_apres_miroir()
-    mil_axe, dec = milieu_axes()
-    p = PILE
+    _mil, dec_roues = milieu_roues()
     return (
-        "axe z=%.2f  tube=%.2f  moyeu=%.2f  alésage utile=%.2f  "
-        "jeu moyeu/épaulement=%.2f  empreinte=%.2f  "
-        "milieu des axes=%.2f (glyphe %.1f, écart %+.2f)  "
-        "faces roues x=%.2f..%.2f milieu=%.2f entraxe=%.2f"
-        % (AXLE_Z, TUBE_LEN, HUB_L, p["bore_depth"],
-           HUB_TIP_U - SHOULDER_U, p["pocket_depth"],
-           mil_axe, GW / 2, dec, g, d, mid, ent)
+        "axe z=%.2f  tubes panse/spine %.2f/%.2f  moyeux %.2f/%.2f  "
+        "jeu épaulement=%.2f  empreinte=%.2f  "
+        "engagement panse/spine %.2f/%.2f  "
+        "faces x=%.2f..%.2f milieu=%.2f (écart glyphe %+.3f) entraxe=%.2f"
+        % (AXLE_Z, TUBE_PANSE, TUBE_SPINE, HUB_PANSE, HUB_SPINE,
+           HUB_TIP_U - SHOULDER_U, PILE_PANSE["pocket_depth"],
+           PILE_PANSE["engagement"], PILE_SPINE["engagement"],
+           g, d, mid, dec_roues, ent)
     )
 
 
 if __name__ == "__main__":
     print(resume())
-    for k, v in sorted(PILE.items()):
-        print("  %-20s %8.3f" % (k, v))
+    for nom, p in (("panse", PILE_PANSE), ("spine", PILE_SPINE)):
+        print("  -- %s" % nom)
+        for k, v in sorted(p.items()):
+            print("    %-20s %8.3f" % (k, v))
     print("  épaulement u       %8.3f" % SHOULDER_U)
     print("  bout moyeu u       %8.3f" % HUB_TIP_U)
     print("  palonnier boss u   %8.3f" % HORN_ON_BOSS)
@@ -320,8 +414,6 @@ if __name__ == "__main__":
     print("  fond empreinte u   %8.3f" % POCKET_FLOOR_U)
     print("  engagement arbre   %8.3f (cas capot, datasheet 6,0 mm)" % (SHAFT_TIP_U - HORN_ON_CAP))
     print("  dalle viewer       %s" % (tuple(round(x, 6) for x in ecran_viewer()),))
+    print("  entraxe symétrique %8.4f mm (doit égaler l'entraxe appliqué)" % ENTRAXE_SYM_MM)
     p = proposition_recentrage()
-    print("  recentrage         NON APPLIQUÉ  delta=%+.2f mm  "
-          "tubes panse/spine %.2f / %.2f  moyeux %.2f / %.2f"
-          % (p["delta_mm"], p["tube_panse_mm"], p["tube_spine_mm"],
-             p["moyeu_panse_mm"], p["moyeu_spine_mm"]))
+    print("  recentrage         APPLIQUÉ  delta=%+.2f mm" % p["delta_mm"])

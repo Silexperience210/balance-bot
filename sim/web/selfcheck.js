@@ -96,6 +96,13 @@
   log("");
 
   // ── 1. PRNG ──
+  // Le recentrage des STL (deux moyeux) ne doit pas « corriger » ces
+  // littéraux. Égalité stricte : une tolérance les affaiblirait.
+  log("0. Rayon dynamique et voie du lacet, figés");
+  check(E.constants.R === 0.0415, "R = 0.0415 exactement (pas le rayon monté 0,042)");
+  check(E.constants.TRACK === 0.13887, "TRACK = 0.13887 exactement (voie du lacet, pas l'entraxe des faces)");
+  log("");
+
   log("1. PRNG MT19937 + random.gauss (référence : CPython, random.seed(42))");
   var rng = new E.PyRandom(42);
   check(rng.random() === 0.6394267984578837 && rng.random() === 0.025010755222666936,

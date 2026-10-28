@@ -12,7 +12,8 @@ ne les réécrit pas. Ce qui a changé depuis, et que le journal ne dit pas :
       (`chassis/NOTES_v3.md`). Pas pesée, pas montée dans cette passe.
 - [x] Perte d'IMU, cadence basse et boucle figée : en mode roue, PWM
       détaché et reprise seulement robot tenu droit. Pas rejoué sur une carte.
-- [ ] Recentrage des roues sur le glyphe : chiffré, **pas appliqué**
+- [x] Recentrage des roues sur le glyphe, appliqué (deux STL, voie
+      inchangée). Le palier spine plus court se juge en roulant
       (`chassis/RECENTRAGE.md`).
 - [ ] Alim servos séparée, neutre µs, sens d'une roue au premier tour,
       palonnier réel au pied à coulisse. Toujours vrais, toujours manuels.
