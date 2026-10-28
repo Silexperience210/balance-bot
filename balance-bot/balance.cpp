@@ -26,7 +26,7 @@
 //
 // Cadencé à BALANCE_LOOP_HZ (200 Hz) par le .ino — dans sa propre tâche
 // sur le cœur BALANCE_TASK_CORE si BALANCE_SPLIT_CORES ; aucun delay() ici.
-// AUCUN Serial dans loop() : USB-CDC peut bloquer (STALL_ANALYSIS.md §6).
+// AUCUN Serial dans loop() : USB-CDC peut bloquer (docs/revues/STALL_ANALYSIS.md §6).
 // ═══════════════════════════════════════════════════════════════════
 #include <Arduino.h>
 #include <Preferences.h>
@@ -43,7 +43,7 @@ namespace {
 // convertie en °/s par kOutToFootDegS). Gains de départ pour un châssis
 // léger — à affiner sur le robot réel.
 //
-// Procédure de réglage (robot tenu à la main) — REVIEW_CLAUDE.md M8.
+// Procédure de réglage (robot tenu à la main) — docs/revues/REVIEW_CLAUDE.md M8.
 // La sortie est une VITESSE de pied : l'accélération de la base (la seule
 // chose qui redresse le pendule) est la DÉRIVÉE de la sortie, soit
 // Ki·θ + Kp·θ̇ + Kd·θ̈. Ici Ki est donc la RAIDEUR, Kp l'AMORTISSEMENT et
@@ -59,7 +59,7 @@ namespace {
 //   3. Kd en dernier, petit (≲ 2) : il ne fait que lisser ; trop → buzz aigu.
 //
 // Gains de DÉPART, NON validés par une simulation rejouable (voir
-// FIRMWARE_REVIEW.md §1bis) : le simulateur du dépôt modélisait un autre
+// docs/revues/FIRMWARE_REVIEW.md §1bis) : le simulateur du dépôt modélisait un autre
 // robot (autorité 57× trop forte, roulement incomplet, sans cascade). Avec
 // le modèle corrigé, ce jeu de gains ne tient aucun scénario — le réglage
 // réel au banc web (BalanceBot-Tune) est l'étape obligatoire suivante.
@@ -88,7 +88,7 @@ constexpr float kKdMax = 20.0f;
 constexpr float kSetpointDeg = 0.0f;
 
 // ── Morts-zones ────────────────────────────────────────────────────
-// Erreur : AUCUNE (0) — REVIEW_CLAUDE.md M3. L'ancienne bande de 0,25°
+// Erreur : AUCUNE (0) — docs/revues/REVIEW_CLAUDE.md M3. L'ancienne bande de 0,25°
 // était appliquée AVANT P et I : le robot vivait sur son bord, chaque
 // sortie de bande donnait un coup de P qui le ramenait juste dedans, où P
 // et I étaient gelés ; l'erreur ne changeait donc jamais de signe,
@@ -106,7 +106,7 @@ constexpr float kErrDeadbandDeg = 0.0f;
 constexpr float kOutMax       = 90.0f;
 
 // ── Anti-windup ────────────────────────────────────────────────────
-// Le terme intégral est borné à la PLEINE sortie (REVIEW_CLAUDE.md M10) :
+// Le terme intégral est borné à la PLEINE sortie (docs/revues/REVIEW_CLAUDE.md M10) :
 // en commande de vitesse, I est le terme de RAIDEUR (cf. procédure de
 // réglage) ; l'ancien plafond de 25 (28 % de kOutMax) bridait
 // l'accélération cumulée de la base — mesuré en sim (mort-zone 0, retard
@@ -117,12 +117,14 @@ constexpr float kOutMax       = 90.0f;
 constexpr float kIntegralMax = kOutMax;
 
 // ── Sortie PID → vitesse de pied ───────────────────────────────────
-// Le domaine du PID (-90..+90) est lu comme des °/s de pied. À 1.0,
-// pleine commande = 90 °/s ; l'arc a un rayon de 32.5 mm, soit
-// 0.567 mm de déplacement au sol par degré → 51 mm/s au maximum.
+// Le domaine du PID (-90..+90) est lu comme des °/s de roue. À 1.0,
+// pleine commande = 90 °/s. Au rayon monté WHEEL_RADIUS_MM (42 mm),
+// 1 ° ≈ 0,73 mm au sol → environ 66 mm/s. Ce facteur n'entre PAS dans
+// la boucle. L'ancienne note « arc 32,5 mm → 51 mm/s » décrivait les
+// pieds v3.1, pas les roues.
 // C'est le PREMIER bouton à monter si le robot est trop lent à se
 // rattraper : un SG90 tient ~300 °/s à vide, donc jusqu'à ~3.0.
-// NON-const depuis REVIEW_CLAUDE.md M11 : slider « Autorité » du banc web
+// NON-const depuis docs/revues/REVIEW_CLAUDE.md M11 : slider « Autorité » du banc web
 // (Balance::setOutScale, borné kOutToFootMin..Max, persisté NVS « kout »)
 // et balayé par le --sweep du sim — où aucun jeu ne tient le moindre
 // scénario sous k_out = 2, et où les tapes ne sont atteintes qu'à k_out = 3.
@@ -244,16 +246,15 @@ Pid   s_pid;
 bool  s_enabled   = false;
 bool  s_imuOk     = false;
 bool  s_fallen    = false;         // verrou de chute (le robot ne se débat pas)
-// REPRISE AUTOMATIQUE après s_imuLost / s_rateLow — choix documenté
-// (REVIEW_CLAUDE.md M19), comportement volontairement CONSERVÉ : les deux
-// drapeaux se relèvent SEULS dès que la cause disparaît (une trame IMU
-// repasse, la cadence revient), sans réarmement par l'utilisateur. Limite :
-// pendant la coupure les pieds sont figés (halt) et l'angle n'a plus
-// intégré le gyro ; à la reprise l'estimation reconverge sur l'accel en
-// ~0,25 s et l'état réel du robot est inconnu. Robot TENU à la main
-// (campagne de réglage) : acceptable. Robot LIBRE : pas plus sûr que
-// d'exiger un réarmement — il est probablement déjà par terre, et c'est
-// alors le verrou de chute (|θ| > kFallAngleDeg) qui prend le relais.
+// Perte IMU / cadence basse.
+// Mode ARC (servo de position) : halt() suffit, le servo tient l'angle,
+// et la reprise est automatique dès que la cause disparaît (M19).
+// Mode ROUE (continu) : le neutre 1500 µs peut ramper si le trim n'est
+// pas parfait. On détache le PWM (haltAndCut) et on pose le verrou de
+// chute : la reprise exige le robot redressé sous kRecoverAngleDeg
+// pendant kRecoverHoldMs, comme après une vraie chute. Ce n'est pas un
+// essai au sol — c'est le même risque que haltAndCut documente déjà
+// pour la chute.
 bool  s_imuLost   = false;         // IMU muet : équilibre coupé jusqu'au retour
 float s_fwdSmooth = 0.0f;          // consignes UI lissées
 float s_turnSmooth= 0.0f;
@@ -262,8 +263,9 @@ unsigned long s_lastMicros   = 0;
 unsigned long s_uprightSince = 0;  // début de la fenêtre de redressement
 bool          s_rateLow      = false;  // boucle trop lente → arrêt de sécurité
 // Coupure « boucle figée » posée par Balance::watchdog() depuis loop()
-// (autre cœur) : la boucle, quand elle repart, réarme les roues et
-// repart propre (halt). volatile : écrit ailleurs, lu à chaque pas.
+// (autre cœur). Au redémarrage : arc = réarmement, roue = verrou de
+// chute (pas de PWM tant que le robot n'est pas tenu droit). volatile :
+// écrit ailleurs, lu à chaque pas.
 volatile bool s_stallCut     = false;
 
 // ── Gains persistants (NVS) ────────────────────────────────────────
@@ -312,13 +314,28 @@ void halt() {
   g_state.balancing = false;
 }
 
-// halt() + roues COUPÉES (PWM détaché) : chute, arrêt d'urgence. Un robot
-// par terre ne doit pas avoir une roue qui tourne dans le vide — et un
-// servo continu au « neutre » peut ramper si son trim n'est pas parfait.
-// Le réarmement (Feet::rearm) n'a lieu qu'au redressement vérifié.
+// halt() + roues COUPÉES (PWM détaché) : chute, arrêt d'urgence, et, en
+// mode continu, perte IMU ou cadence basse. Un robot par terre ne doit
+// pas avoir une roue qui tourne dans le vide — et un servo continu au
+// « neutre » peut ramper si son trim n'est pas parfait. Le réarmement
+// (Feet::rearm) n'a lieu qu'au redressement vérifié.
 void haltAndCut() {
   halt();
   Feet::cut();
+}
+
+// Arrêt quand on ne sait plus où est le robot (IMU muet, boucle trop
+// lente). En continu, même traitement qu'une chute. En arc, frein sur
+// place et reprise automatique.
+void blindHold() {
+#if FEET_MODE_CONTINUOUS
+  if (!Feet::isCut()) haltAndCut();
+  else halt();
+  s_fallen = true;
+  s_uprightSince = 0;
+#else
+  halt();
+#endif
 }
 
 // Recopie la position des pieds dans l'état partagé (affichage UI).
@@ -365,7 +382,7 @@ bool recenterStep(float footAvg, float dtRec) {
 // Boucle INTERNE de la cascade (appelée à 200 Hz) : l'écart entre la
 // vitesse de pied voulue et celle réellement commandée devient un angle.
 //
-// SIGNE NON TRANCHÉ — à décider en RÉEL (REVIEW_CLAUDE.md M1). Deux
+// SIGNE NON TRANCHÉ — à décider en RÉEL (docs/revues/REVIEW_CLAUDE.md M1). Deux
 // arguments s'opposent :
 //   · (−), retenu ici depuis le 09/09 : un setpoint POSITIF fait pencher
 //     le robot vers l'avant, ce qui commande au PID des pieds une rotation
@@ -477,7 +494,7 @@ bool begin() {
   }
 
   // Calibration du neutre : biais gyro mesuré robot posé, immobile
-  // (~2 s bloquantes, 400 vrais échantillons à 200 Hz — REVIEW_CLAUDE.md
+  // (~2 s bloquantes, 400 vrais échantillons à 200 Hz — docs/revues/REVIEW_CLAUDE.md
   // M18). Un échec (bus instable, trames figées) laisse le biais gyro à 0
   // et l'angle amorcé par Imu::begin() : on le DIT sur le port série
   // (setup(), pas encore le chemin chaud) sans couper l'IMU pour autant.
@@ -510,14 +527,19 @@ void loop() {
 
   // ── Reprise après une coupure « boucle figée » ───────────────────
   // La surveillance a détaché les roues pendant qu'on ne tournait pas.
-  // On repart PROPRE (intégrateurs vidés) avec les roues réarmées : même
-  // philosophie que s_rateLow / s_imuLost (REVIEW_CLAUDE.md M19, reprise
-  // automatique dès que la cause disparaît). Si le robot est tombé
-  // pendant la coupure, le verrou de chute prend le relais ci-dessous.
+  // Arc : on réarme et on repart propre (M19). Roue : on NE réarme pas.
+  // La tâche a été bloquée, l'angle pendant ce temps est inconnu ; le
+  // verrou de chute exige un redressement tenu avant le prochain PWM.
   if (s_stallCut) {
     s_stallCut = false;
+#if FEET_MODE_CONTINUOUS
+    s_fallen = true;
+    s_uprightSince = 0;
+    halt();
+#else
     Feet::rearm();
     halt();
+#endif
   }
 
   // ── Fréquence RÉELLE d'appel (debug UI) ─────────────────────────
@@ -540,8 +562,9 @@ void loop() {
   }
 
   // Cadence insuffisante : on ne pilote plus (voir kMinLoopHz).
+  // En continu, blindHold détache le PWM et verrouille la reprise.
   if (s_rateLow) {
-    halt();
+    blindHold();
     publishFeet();
     return;
   }
@@ -550,7 +573,7 @@ void loop() {
   // Refus d'ARMER sur batterie faible : sous BAT_LOW_V la cellule est à
   // ~10 % et l'appel de courant des servos fait s'effondrer la tension
   // (brownout → reboot en pleine correction). On annule la demande.
-  // Sur le FRONT MONTANT seulement (REVIEW_CLAUDE.md M6) : testée à chaque
+  // Sur le FRONT MONTANT seulement (docs/revues/REVIEW_CLAUDE.md M6) : testée à chaque
   // itération, cette garde désarmait aussi un robot DEBOUT (halt() →
   // chute) sur un seul échantillon ADC en creux. batteryLow est désormais
   // hystérétique et débouncé (battery.cpp), et un robot déjà en équilibre
@@ -580,7 +603,7 @@ void loop() {
   if (!s_imuOk) {
     // Pas d'IMU : aucun équilibre possible, mais la mécanique reste
     // pilotable en démo par les flèches de l'UI.
-    // halt() sur FRONT seulement (REVIEW_CLAUDE.md M7) : appelé à chaque
+    // halt() sur FRONT seulement (docs/revues/REVIEW_CLAUDE.md M7) : appelé à chaque
     // itération, il réarmait Feet::s_lastMicros (via Feet::stop()) quelques
     // µs avant le driveFootSpeed() de demoStep(), qui voyait dt ≈ 20 µs →
     // borné à 0,5 ms au lieu des 5 ms réels : la démo roulait 10× trop
@@ -616,14 +639,14 @@ void loop() {
   // coupe et on attend le retour du capteur (s_imuLost se relève seul dès
   // qu'une trame repasse). Un capteur qui ACK mais renvoie des registres
   // figés compte aussi comme « trame perdue » (imu.cpp, kFrozenMax —
-  // REVIEW_CLAUDE.md M9).
+  // docs/revues/REVIEW_CLAUDE.md M9).
   static uint16_t s_imuFailStreak = 0;
   if (Imu::update(dt)) {
     s_imuFailStreak = 0;
     s_imuLost = false;
   } else if (++s_imuFailStreak >= kImuFailMax) {
     s_imuLost = true;
-    halt();
+    blindHold();
     publishFeet();
     return;
   }
@@ -815,7 +838,7 @@ void getRecenterGains(float& kpPhi, float& kv) {
 }
 
 // ── Autorité de sortie (°/s de pied par unité de sortie PID) ────────
-// Bornée 1-3 (REVIEW_CLAUDE.md M11) : sous 1 le robot n'a plus de quoi se
+// Bornée 1-3 (docs/revues/REVIEW_CLAUDE.md M11) : sous 1 le robot n'a plus de quoi se
 // rattraper, au-delà de 3 on dépasse ce qu'un SG90 tient à vide.
 void setOutScale(float k) {
   if (!isnan(k)) kOutToFootDegS = constrain(k, kOutToFootMin, kOutToFootMax);

@@ -108,7 +108,7 @@ namespace Balance {
   void  setRecenterGains(float kpPhi, float kv);  // bornés 0-5 / 0-20
   void  getRecenterGains(float& kpPhi, float& kv);
   // Autorité de sortie kOutToFootDegS (°/s de pied par unité de sortie PID),
-  // bornée 1-3, persistée NVS — REVIEW_CLAUDE.md M11.
+  // bornée 1-3, persistée NVS — docs/revues/REVIEW_CLAUDE.md M11.
   void  setOutScale(float k);
   float getOutScale();
   float pitchRateDps();          // dernière vitesse gyro (°/s) — télémétrie

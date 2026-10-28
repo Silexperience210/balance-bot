@@ -46,7 +46,7 @@
 #define SERVO_HEAD_TILT 10     // tête : inclinaison (SG90 standard)
 
 // ── TYPE des servos de ROUES — sélecteur de mode (compile-time) ─────
-// Deux matériels possibles sur les mêmes broches, même boîtier 23×12.2×29 :
+// Deux matériels possibles sur les mêmes broches, même boîtier 22,8×12,2×22,5 :
 //   0 = SG90 STANDARD 180° (ancienne mécanique v3.1 « pieds en arc ») : le
 //       servo ne connaît que la POSITION. feet.cpp intègre la vitesse du
 //       PID (°/s) en position (°) et écrit l'angle. Débattement FINI.
@@ -90,6 +90,14 @@
 
 // ── Constantes robot ───────────────────────────────────────────────
 #define BALANCE_LOOP_HZ 200    // fréquence de la boucle d'équilibre
+// Rayon MONTÉ du châssis, en mm : chassis/cotes.py AXLE_Z (fond de gorge
+// + épaisseur du pneu). La boucle d'équilibre commande des °/s de roue,
+// elle ne multiplie PAS par ce rayon. Le modèle dynamique du simulateur
+// reste à 41,5 mm (rayon du pneu non étiré) : selfcheck.js est figé
+// dessus. Cette constante sert à la doc et à la CI, pas au PID.
+// Les deux moyeux n'ont pas la même longueur (recentrage, cotes.py) :
+// le rayon est le même des deux côtés, et la boucle n'utilise pas la voie.
+#define WHEEL_RADIUS_MM 42.0f
 // Butée DURE du pied en arc (°) — SOURCE UNIQUE, active seulement si
 // FOOT_TRAVEL_LIMITED. feet.cpp l'applique (clamp de φ + coupure explicite
 // de la commande) et balance.cpp s'en sert pour le soft clamp qui s'ouvre

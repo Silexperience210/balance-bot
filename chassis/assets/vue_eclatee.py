@@ -5,12 +5,14 @@ Repère du design (identique au générateur du châssis) :
     X = gauche→droite (largeur)   Y = arrière→avant (profondeur, avant = +Y)
     Z = hauteur (sol = 0)
 
-Cotes utilisées (celles du projet, chassis/gen_bitcoin_bot.py) :
+Dessin d'illustration. Les cotes d'assemblage réelles sont dans
+chassis/cotes.py (axe à 42 mm, deux moyeux, roues centrées sur le glyphe).
+Ce dessin garde sa voie de 108 mm : ce n'est pas l'assemblage.
+Les nombres ci-dessous placent les pièces du dessin, ils ne décrivent
+pas le STL :
     carte T-Display-S3 Touch 62 × 26 × 1,2       servo 9 g 22,8 × 12,2 × 22,5
-    axe des roues z = 41,5 (WHEEL_R)             voie des roues 108
-    roue ₿ Ø80 × 8 + moyeu Ø24 × 13              bande TPU Ø83 × 7
     HC-SR04 45 × 20 + transducteurs Ø16, entraxe 26 (z = 145)
-    MPU6050 : dessus du piédestal z = 36,5
+    bande TPU Ø83 × 7
 
 Rendus : chassis/render/eclate_iso.png et chassis/render/interne_avant.png
 Usage  : blender --background --python chassis/assets/vue_eclatee.py
@@ -130,9 +132,12 @@ back = importer_stl("b_back", os.path.join(V3, "b_back.stl"), MAT_COQUE)
 back.location = (0, -E_SHELL, 0)
 
 # ── roues + bandes TPU (pièces réelles) ───────────────────────────────────
+# D = panse (moyeu long), G = spine (moyeu court). TRACK ici est celui
+# du dessin éclaté, pas la voie réelle.
+_STL_ROUE = {"D": "coin_wheel_panse.stl", "G": "coin_wheel_spine.stl"}
 for cote, sx in (("D", -1), ("G", 1)):
     x = X_MID + sx * (TRACK / 2)
-    roue = importer_stl(f"roue_{cote}", os.path.join(V3, "coin_wheel.stl"), MAT_ROUE)
+    roue = importer_stl(f"roue_{cote}", os.path.join(V3, _STL_ROUE[cote]), MAT_ROUE)
     # moyeu vers l'intérieur du corps (miroir entre gauche et droite)
     roue.rotation_euler = (0, -sx * math.pi / 2, 0)
     roue.location = (x, Y_WHEEL, Z_WHEEL)

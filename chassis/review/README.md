@@ -11,7 +11,9 @@ Tous les scripts tournent avec le venv DfAM (`trimesh` + `scipy`) :
 |---|---|
 | `RAPPORT_IMPRESSION_v31.md` | Revue d'impression complète (cotes, surplombs, anomalies, optimisations) — état AVANT corrections |
 | `audit.py` | Audit topologique : bbox, volume, composantes, boucles ouvertes, non-manifold, surplombs par orientation d'impression |
-| `verif_ultime.py` | **Vérification finale 25 points** : arêtes libres = 0, non-manifold = 0, cotes, volumes, paliers G+D, avant-trous M3, alésages goujons, yeux HC-SR04, fenêtre écran, roue, pneu |
+| `verif_ultime.py` | Vérification des maillages : arêtes libres, non-manifold, cotes, volumes, paliers, avant-trous M3, goujons, yeux, fenêtre, bras de roue, pneu. Code de sortie 1 si un point échoue. |
+| `chaine_roue.py` | Chaîne servo → moyeu → roue mesurée sur les STL (épaulement, capot, semelle, empreinte, allègement) contre `cotes.py`. |
+| `servo_fit.py` | Intersection booléenne EXACTE servo × coques (Blender). `--hump` ajoute le capot oblong. |
 | `test_ouverture.py` | Vérifie que les coques sont bien OUVERTES au joint (design CREUX) et non scellées par une peau |
 | `faces.py` | Surplombs réels dans l'orientation d'impression : liste les plafonds plats par altitude (ponts vs support) |
 | `find_transform.py` | Retrouve la transformation plaque↔pièce par alignement de sommets (sert à valider `chassis/make_plates.py`) |
@@ -21,12 +23,21 @@ Tous les scripts tournent avec le venv DfAM (`trimesh` + `scipy`) :
 ## Chaîne complète après un changement de châssis
 
 ```bash
-blender --background --python chassis/gen_bitcoin_bot.py   # régénère chassis/v3/*.stl
-python3 chassis/make_plates.py                             # régénère export/v31/*.stl
-~/.hermes/venvs/dfam/bin/python chassis/review/verif_ultime.py   # doit afficher 25/25
+blender --background --python chassis/gen_bitcoin_bot.py
+python3 chassis/make_plates.py
+python3 chassis/review/chaine_roue.py
+python3 chassis/review/verif_ultime.py
+blender --background --python chassis/review/servo_fit.py -- chassis/v3
+blender --background --python chassis/review/servo_fit.py --hump -- chassis/v3
 ```
 
-## Repères (état vérifié 09/09/2026)
+La CI (`.github/workflows/verifier.yml`) lance `cotes.py`, `chaine_roue.py` et
+`verif_ultime.py`. Elle ne lance pas Blender.
+
+## Repères historiques (09/09/2026, roue encore pleine)
+
+Les volumes ci-dessous ne sont plus ceux des STL courants. Lancer
+`chaine_roue.py` pour les chiffres du jour.
 
 - b_front 132,13 × 23,02 × 201,00 — 105,8 cm³ (134 g PETG) — watertight, 5 composantes (1 coque + 4 vides d'avant-trous M3)
 - b_back 132,13 × 29,00 × 201,00 — 91,5 cm³ (116 g PETG) — watertight, 1 composante

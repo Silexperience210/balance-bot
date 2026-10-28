@@ -45,7 +45,7 @@ static inline void balanceStep() {
 // FreeRTOS tourne à 1000 Hz (CONFIG_FREERTOS_HZ) → 200 Hz = 5 ticks
 // exacts. La tâche cède le cœur entre deux pas : l'IDLE0 tourne (le
 // watchdog de tâche surveille l'IDLE du cœur 0), le WiFi (priorité 23)
-// aussi. Aucun Serial ici : USB-CDC peut bloquer (STALL_ANALYSIS.md §6).
+// aussi. Aucun Serial ici : USB-CDC peut bloquer (docs/revues/STALL_ANALYSIS.md §6).
 static TaskHandle_t s_balanceTask = nullptr;
 
 static void balanceTask(void*) {
@@ -207,7 +207,7 @@ void loop() {
     keyDone = false;
   } else if (keyNow && !keyDone && (nowMs - keyDownMs >= TUNER_TOGGLE_HOLD_MS)) {
     keyDone = true;
-    // Aucun Serial ici (STALL_ANALYSIS.md §6, REVIEW_CLAUDE M14) : la
+    // Aucun Serial ici (docs/revues/STALL_ANALYSIS.md §6, REVIEW_CLAUDE M14) : la
     // trace « OUVERT / FERMÉ » est écrite par la tâche du tuner.
     (void)Tuner::toggle();
     s_lastPhase = 3;

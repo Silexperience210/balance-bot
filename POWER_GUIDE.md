@@ -1,21 +1,37 @@
-# BalanceBot — Guide d'alimentation des servos (LOT 3)
+# BalanceBot — Alimentation des servos
 
-**Règle d'or : les servos ne tirent JAMAIS sur le 3V3 ou le 5V de la carte.**
-Un SG90 en mouvement/blocage tire 200-700 mA (pic ~1 A). Le régulateur USB
-de la carte s'effondre → brownout → reboot (déjà observé au test du 06/09).
-Les servos ont leur PROPRE rail d'alim, avec la MASSE commune à la carte.
+**Les servos ne tirent jamais sur le 3V3 ou le 5V de la carte.**
+Un SG90 en mouvement ou en blocage tire 200 à 700 mA, pic vers 1 A. Le
+régulateur USB de la carte s'effondre, brownout, reboot. Déjà observé au
+test du 06/09. Rail séparé, masse commune avec la carte.
 
-## Consommation réelle
-- 2 servos de pieds (équilibre, mouvement quasi continu) : 100-400 mA
-- + 2 servos de tête (balayage démo) : +100-200 mA
-- Total : ~0,5-1 A en crête → rail 5V/2A+ recommandé
+Le robot imprimé a **deux** servos de roues, 9 g, rotation continue
+(FS90R ou équivalent, boîtier 22,8 × 12,2 × 22,5). Le firmware a aussi
+deux broches de tête (`GPIO 3` et `GPIO 10`) : le châssis v3 n'a pas la
+mécanique pan/tilt (`ROADMAP` 4.4). Tant que la tête n'est pas montée,
+le rail n'alimente que les deux roues.
+
+Un continu au neutre 1500 µs peut ramper si le trim (`kTrimUsL` /
+`kTrimUsR` dans `feet.cpp`) n'est pas fait. Le détachement du PWM
+(chute, perte d'IMU, cadence basse, BOOT long) met les broches à 0. Il
+ne coupe pas ce rail : un interrupteur sur le 5 V reste utile
+(`ROADMAP` 5.2).
+
+## Consommation
+
+- 2 servos de roues, équilibre, mouvement presque continu : 100–400 mA
+- 2 servos de tête, seulement si la mécanique existe : +100–200 mA
+- Crête : prévoir un rail 5 V capable de 2 A dès que les quatre sont là
+
+Les chiffres sont des ordres de grandeur de SG90, pas une mesure sur
+ce robot.
 
 ## Options (de la plus simple à la plus propre)
 
 ### Option A — Power bank USB (test immédiat, 0 € si tu en as un)
 ```
-Power bank 5V ──┬── servo pied G (rouge) ──┐
-                ├── servo pied D (rouge) ──┤  2-3 servos max
+Power bank 5V ──┬── servo roue G (rouge) ──┐
+                ├── servo roue D (rouge) ──┤  + tête seulement si montée
                 └── servo tête (rouge) ────┘
 Toutes les MASSE (marron) ──┐
                             ├──→ GND de la carte (INDISPENSABLE)
@@ -58,7 +74,9 @@ Signaux : S1→GPIO1  S2→GPIO2  S3→GPIO3  S10→GPIO10
 
 ## Checklist avant d'armer l'équilibre
 - [ ] Masse commune carte ↔ alim servos (sans ça : comportements fous)
-- [ ] Jamais de fil rouge sur 3V3
-- [ ] Carte alimentée en USB (données + 5V logique) — les 2 masses reliées
-- [ ] Test : activer la démo (flèches) → les pieds bougent SANS reboot
-- [ ] Si reboot : alim servos insuffisante → Option C (buck + condos)
+- [ ] Jamais de fil rouge servo sur le 3V3 ou le 5V de la carte
+- [ ] Carte alimentée (USB ou LiPo 1S sur son connecteur) — les deux masses reliées
+- [ ] Trim du neutre : roues immobiles, consigne nulle, sans ramper
+- [ ] Démo (flèches, équilibre OFF) : les roues tournent sans reboot
+- [ ] Si reboot : rail servos insuffisant → option C (buck + condensateurs)
+- [ ] Le palonnier et le capot ont été comparés à `docs/MONTAGE.md`

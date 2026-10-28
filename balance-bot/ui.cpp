@@ -13,7 +13,7 @@
 // (ModulesCSTSelf.tpp) — il aligne les axes sans fixer leur sens. Le sens
 // de l'axe long du CST816 est opposé à l'axe x écran : le miroir horizontal
 // est appliqué explicitement dans readTouch() (kTouchMirrorX). Voir
-// TOUCH_REVIEW.md §1 — sans ce miroir, appuyer sur AVANT/GAUCHE armait le
+// docs/revues/TOUCH_REVIEW.md §1 — sans ce miroir, appuyer sur AVANT/GAUCHE armait le
 // robot. Aucune combinaison de setRotation ne peut produire une réflexion.
 // et séquence d'init ST7789V custom (LCD_MODULE_CMD_1) envoyée après
 // tft.init() : requise par les panneaux de la 2ᵉ révision.
@@ -94,7 +94,7 @@ static TouchLib* g_touch = nullptr;
 static bool     g_touchedRaw = false;
 static int16_t  g_touchX = -1, g_touchY = -1;
 
-// Orientation du tactile — cf. TOUCH_REVIEW.md §1.
+// Orientation du tactile — cf. docs/revues/TOUCH_REVIEW.md §1.
 // TouchLib::setRotation(1) fait UNIQUEMENT un échange x↔y (transposition,
 // ModulesCSTSelf.tpp:100-104). Une transposition aligne les axes mais ne
 // fixe pas leur SENS, et aucune rotation (ni tft.setRotation, ni TouchLib)
@@ -117,7 +117,7 @@ static uint32_t g_touchSeq   = 0;
 // Verrou d'appui : positionné à chaque changement de mode AUTO ↔ MANUEL pour
 // que le doigt déjà posé ne soit pas relu comme un nouvel appui (sans lui,
 // le tap sur STOP ré-armait le robot 16 ms plus tard, et l'armement au doigt
-// ouvrait l'écran STOP — FACE_REVIEW.md constats 2 et 7).
+// ouvrait l'écran STOP — docs/revues/FACE_REVIEW.md constats 2 et 7).
 static bool g_touchLatch = false;
 static uint8_t s_latchOff = 0;      // trames consécutives sans doigt (levée du verrou)
 static bool s_downPhysical = false; // doigt physiquement présent (avant verrou)
@@ -184,7 +184,7 @@ static void updateLabel(int x, int y, int w, const char* s, uint16_t color) {
 // ══════════════════════════════════════════════════════════════════
 // VISAGE (mode AUTO) — géométrie validée par rendus avant flash :
 // amande à paupière haute quasi droite et ventre bombé, gros iris,
-// inclinaison vers l'intérieur pour l'air fâché. Voir FIRMWARE_REVIEW.md.
+// inclinaison vers l'intérieur pour l'air fâché. Voir docs/revues/FIRMWARE_REVIEW.md.
 // ══════════════════════════════════════════════════════════════════
 namespace {
 
@@ -380,7 +380,7 @@ void faceDrawEye(int cx, int inn, const FaceFrame& f, IrisGeom* out) {
   // au reflet) : sinon les deux iris convergent et le visage louche.
   // L'amplitude est bornée par expression (gazeMax) pour que l'iris reste
   // dans l'amande : sinon son effacement incrémental peint de l'orange sur
-  // le fond (FACE_REVIEW.md constat 10).
+  // le fond (docs/revues/FACE_REVIEW.md constat 10).
   const int ix = cx + gx;
   const int iy = FACE_CY + (int)(hb * 0.30f);
   if (out) { out->x = ix; out->y = iy; out->r = r; out->slit = slit; out->inn = inn; out->valid = true; }
@@ -470,7 +470,7 @@ void faceUpdateStopBar(unsigned long resteMs) {
 inline int gazeQ(float g) { return ((int)g / 2) * 2; }
 
 // Expression courante + instant d'entrée : sert à l'hystérésis et à la durée
-// de maintien minimale (FACE_REVIEW.md constat 5). Sans elles, le bruit gyro
+// de maintien minimale (docs/revues/FACE_REVIEW.md constat 5). Sans elles, le bruit gyro
 // faisait changer d'expression plusieurs fois par seconde → un redraw complet
 // de 14 ms à chaque image, soit ~280 ms/s volés à la boucle d'équilibre.
 FaceExpr      s_exprCur   = FX_CALME;
@@ -520,7 +520,7 @@ volatile bool          s_forcedSweep = false;   // aperçu : fait balayer le reg
 
 // ── État du mode AUTO ──────────────────────────────────────────────
 // Hoisté hors de uiAutoLoop() : faceEnter() doit pouvoir le réinitialiser
-// sur le front MANUEL → AUTO (FACE_REVIEW.md constats 1, 2, 4, 7, 12).
+// sur le front MANUEL → AUTO (docs/revues/FACE_REVIEW.md constats 1, 2, 4, 7, 12).
 bool          s_stopShown  = false;
 uint8_t       s_stopStep   = 0;      // dessin du STOP en 2 images
 unsigned long s_stopUntil  = 0;
@@ -642,7 +642,7 @@ void readTouch() {
   // miroir horizontal explicite (kTouchMirrorX). Aucune rotation ne peut le
   // faire à notre place — une rotation ne produit jamais une réflexion.
   // Symptôme d'origine : appuyer sur AVANT/GAUCHE tombait dans la zone du
-  // bouton ÉQUILIBRE et ARMAIT le robot (TOUCH_REVIEW.md §1.7, C1).
+  // bouton ÉQUILIBRE et ARMAIT le robot (docs/revues/TOUCH_REVIEW.md §1.7, C1).
   //
   // Bornage AVANT le miroir : une valeur aberrante (parasite I²C, bord du
   // verre ; p.x/p.y font 12 bits, jusqu'à 4095) est d'abord ramenée dans le
@@ -1019,7 +1019,7 @@ void ensureAutoSleepOff() {
 void Ui::setTouchSkip(bool skip) { s_touchSkip = skip; }
 void Ui::setIntGate(bool on)     { s_intGate = on; }
 
-// Diagnostic tactile — cf. TOUCH_REVIEW.md §4.
+// Diagnostic tactile — cf. docs/revues/TOUCH_REVIEW.md §4.
 Ui::TouchDebug Ui::touchDebug() {
   Ui::TouchDebug d;
   d.down = g_touchedRaw;
@@ -1337,7 +1337,7 @@ void Ui::previewFace(uint8_t expr, unsigned long ms, bool sweep) {
   s_forcedExpr  = (FaceExpr)constrain((int)expr, 0, (int)FX_CHUTE);
   s_forcedSweep = sweep;
   // 60 s maxi : sans borne, /api/face?t=100000 confisquait l'écran pendant
-  // 27 h et rendait l'écran MANUEL inaccessible (FACE_REVIEW.md constat 9).
+  // 27 h et rendait l'écran MANUEL inaccessible (docs/revues/FACE_REVIEW.md constat 9).
   s_forcedUntil = millis() + (ms > 60000UL ? 60000UL : ms);
   s_faceForced  = true;              // publié EN DERNIER (tâche tuner → loop())
 }

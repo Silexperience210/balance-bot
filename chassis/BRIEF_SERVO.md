@@ -1,4 +1,10 @@
-# Brief — Baies de servo du châssis BalanceBot v3 (à corriger)
+# Brief — Baies de servo du châssis BalanceBot v3 (historique)
+
+> Les trous d'axe ne sont plus gelés à Ø12,8. La chaîne courante (capot oblong,
+> épaulement, semelle, empreinte de palonnier) est dans `chassis/cotes.py` et
+> `chassis/NOTES_v3.md`. Ce brief décrit le défaut d'origine.
+
+
 
 ## Contexte
 Le châssis est **généré paramétriquement** par `chassis/gen_bitcoin_bot.py`

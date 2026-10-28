@@ -101,7 +101,7 @@ bool readRaw(Raw& r) {
   return true;
 }
 
-// ── Vivacité du capteur (REVIEW_CLAUDE.md M9) ──────────────────────
+// ── Vivacité du capteur (docs/revues/REVIEW_CLAUDE.md M9) ──────────────────────
 // readRaw() ne détecte que l'échec de TRANSACTION. Un MPU6050 qui ACK mais
 // renvoie des registres FIGÉS (retombé en veille/reset après un creux
 // d'alimentation : trame de zéros, ou dernière valeur gelée) passerait
@@ -199,7 +199,7 @@ bool calibrate(uint16_t samples) {
   // Le capteur produit un échantillon toutes les 5 ms (kSmplrtDiv = 4) :
   // lire plus vite relit le même registre. L'ancienne boucle à ~1,4 kHz
   // donnait 400 lectures ≈ 60 échantillons distincts lus 7× chacun — biais
-  // √7 fois plus bruité qu'annoncé (REVIEW_CLAUDE.md M18). On lit donc à
+  // √7 fois plus bruité qu'annoncé (docs/revues/REVIEW_CLAUDE.md M18). On lit donc à
   // ~200 Hz (delay(5) + ~0,4 ms de transaction > 5 ms : jamais deux fois
   // le même échantillon) pendant ~2 s, et readLive() écarte de toute façon
   // les trames figées (M9), qui ne comptent pas.

@@ -1,4 +1,32 @@
-# BalanceBot — Backlog d'amélioration (marathon jusqu'au 07/09 23h59)
+# BalanceBot — Backlog
+
+## Lecture au 27/10/2026
+
+Les lots 1 à 7 ci-dessous sont le journal du marathon de septembre. On
+ne les réécrit pas. Ce qui a changé depuis, et que le journal ne dit pas :
+
+- [x] Mode continu compilé (`FEET_MODE_CONTINUOUS 1`), deux cœurs dans le
+      code, joystick du banc web, QR Lightning statique. Détail et ce qui
+      reste à faire sur le robot : `ROADMAP.md`.
+- [x] Chaîne servo-roue régénérée et mesurée sur les STL
+      (`chassis/NOTES_v3.md`). Pas pesée, pas montée dans cette passe.
+- [x] Perte d'IMU, cadence basse et boucle figée : en mode roue, PWM
+      détaché et reprise seulement robot tenu droit. Pas rejoué sur une carte.
+- [x] Recentrage des roues sur le glyphe, appliqué (deux STL, voie
+      inchangée). Le palier spine plus court se juge en roulant
+      (`chassis/RECENTRAGE.md`).
+- [ ] Alim servos séparée, neutre µs, sens d'une roue au premier tour,
+      palonnier réel au pied à coulisse. Toujours vrais, toujours manuels.
+- [ ] Le Ki 500 « validé en simulation » du lot 2b reste **invalidé** pour
+      les gains par défaut : `selfcheck.js` donne encore 0/6 scénarios tenus
+      avec Kp 25 / Ki 500 / Kd 0,5. Un autre jeu (Ki 350, Kd 1, Kv 0) en
+      tient 5/6 dans le même auto-test. Ça ne remplace pas un essai.
+
+Le reste de ce fichier est l'historique.
+
+---
+
+# Historique — marathon jusqu'au 07/09
 
 Source : avis Claude Opus (analyse complète firmware + châssis).
 Statuts : ⬜ à faire · 🔄 en cours · ✅ fait · ⏸ bloqué (hardware/attente)
@@ -35,7 +63,7 @@ Statuts : ⬜ à faire · 🔄 en cours · ✅ fait · ⏸ bloqué (hardware/att
       57× trop forte (cf. commit 19535f7). Modèle corrigé + cascade portée :
       **0/6 scénarios** pour Kp25/Ki500/Kd0.5, et **aucun** jeu du balayage
       (Kp 0,5-100 / Ki 350-2000 / Kd 0,2-20) ne tient. À re-régler au banc web
-      sur le robot réel — voir FIRMWARE_REVIEW.md §1bis.
+      sur le robot réel — voir docs/revues/FIRMWARE_REVIEW.md §1bis.
 - [ ] Cascade de recentrage : **signe de la boucle interne était inversé**
       (poussait le pied vers la butée) — corrigé, gains à régler en réel.
 

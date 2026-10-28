@@ -1,5 +1,13 @@
 # ₿ BalanceBot v3.1 — REVUE IMPRESSION 3D (audit mesuré)
 
+> **Document historique (09/09/2026).** Les cotes, volumes et défauts ci-dessous
+> décrivent les STL de cette date. L'état courant est `chassis/NOTES_v3.md`,
+> contrôlé par `chassis/review/chaine_roue.py` et `verif_ultime.py`.
+> La dépouille à 45° des creux du ₿ n'a pas été appliquée : un contre-poinçon
+> de 1,6 mm sur une dizaine de millimètres de large ne se ferme pas par un
+> chanfrein de bord, et le remplir changerait la face. Voir la PR de la
+> chaîne servo-roue.
+
 > **SUITE APPLIQUÉE le 09/09/2026** (commits `eda934a` + `fe0570b`) — voir `NOTES_v3.md`, section
 > « Révision du 09/09/2026 ». Résumé : alésages de palier débouchants (le tube gauche était bouché
 > dans les STL committés → roue non montable), purge des voiles d'épaisseur nulle, bouchage du

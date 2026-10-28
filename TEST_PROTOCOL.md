@@ -76,9 +76,9 @@ monter Kv à 1 puis 3, et Kpφ à 0.4 puis 0.8. Raison : `Kv·(v_cible − φ̇)
 borné à ±6°, soit autant que le plein gaz des flèches — à Kv = 3 il sature
 dès 2 °/s d'écart de vitesse et peut injecter une assiette de consigne en
 créneau. Ce point n'a jamais tourné sur du matériel réel, et le **signe** de
-la boucle interne n'est pas tranché (REVIEW_CLAUDE.md M1) : Kv = 0 d'abord.
+la boucle interne n'est pas tranché (docs/revues/REVIEW_CLAUDE.md M1) : Kv = 0 d'abord.
 
-**Réarmement après un STOP — sans recentrage (à connaître, REVIEW_CLAUDE.md
+**Réarmement après un STOP — sans recentrage (à connaître, docs/revues/REVIEW_CLAUDE.md
 M16)** : après STOP, les pieds restent où ils étaient (voulu : un retour au
 neutre ferait basculer un robot debout). À l'armement suivant, aucun
 recentrage automatique n'a lieu — seul le chemin « chute, puis 700 ms tenu

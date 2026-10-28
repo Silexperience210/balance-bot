@@ -34,7 +34,10 @@
   "use strict";
 
   // ── Paramètres physiques (balancebot_sim.py l.72-74) ─────────────
-  var G = 9.81, R = 0.0415, H = 0.080;      // gravité, rayon de ROULAGE (pneu Ø83 → 41,5 mm), hauteur CoM (m)
+  var G = 9.81, R = 0.0415, H = 0.080;      // gravité, rayon DYNAMIQUE figé (selfcheck), hauteur CoM (m)
+  // Le rayon MONTÉ du châssis est 42,0 mm (cotes.AXLE_Z). On ne le recopie
+  // pas ici : les références de selfcheck.js sont bit à bit sur 0,0415.
+  // Le viewer lit meta.rayonRoulement pour poser le maillage.
   var TAU_SERVO = 0.05, VMAX_SERVO = 250.0; // servo : 1er ordre (s), vitesse max (°/s)
   var DT = 1.0 / 200;                       // pas de contrôle = 200 Hz (comme le code)
 
@@ -59,8 +62,11 @@
   var TILT_PER_CMD = 0.06;                  // kTiltPerCmd  : ° de consigne par unité de cmdForward
   var TURN_PER_CMD = 0.30;                  // kTurnPerCmd  : unités de sortie par unité de cmdTurn
   var CMD_SLEW_PER_S = 200.0;               // kCmdSlewPerS : lissage des consignes (unités/s)
-  // Voie des roues (m), plans médians des pneus : faces externes à 146,87 mm
-  // (exporter_parts_web.py TRACK), pneu centré 4 mm en dedans → 138,87 mm.
+  // Voie des roues (m), plans médians des pneus. Le 0,13887 vient d'un
+  // entraxe de faces de 146,87 mm (pneu centré 4 mm en dedans). Les STL
+  // d'aujourd'hui ont les faces à 150,13 mm ; le recentrage sur le glyphe
+  // déplace le milieu sans changer cet entraxe. On ne recalcule pas ce
+  // littéral : selfcheck.js l'exige au bit, des deux langages.
   // Sert UNIQUEMENT à la cinématique du lacet — le firmware n'a ni cap ni
   // odométrie (head.cpp l.10-15) : le lacet est une grandeur du SIMULATEUR
   // (pour voir le pivot), pas une grandeur du robot.
@@ -421,7 +427,7 @@
 
       // boucle INTERNE (200 Hz) : contribution à θ_ref. SIGNE (−), aligné sur
       // balance.cpp recenterSetpoint() : −kRecenterKv·(v_cible − φ̇). Non
-      // tranché en réel (REVIEW_CLAUDE.md M1) — ne se change qu'avec le
+      // tranché en réel (docs/revues/REVIEW_CLAUDE.md M1) — ne se change qu'avec le
       // firmware ET le Python, jamais ici seul.
       var ref = 0.0;
       if (cascade) {
@@ -443,7 +449,7 @@
       }
       var out = Math.max(-OUT_MAX, Math.min(OUT_MAX, p + integ + d));
       // soft clamp de butée (feet.cpp fournit φ intégré = phi_cmd).
-      // SIGNE (REVIEW_CLAUDE.md M2) : `out` est la sortie PID NON inversée ;
+      // SIGNE (docs/revues/REVIEW_CLAUDE.md M2) : `out` est la sortie PID NON inversée ;
       // la vitesse de pied réelle est u = −out. Le pied pousse vers la butée
       // quand u·φ > 0 ⇔ (−out)·φ > 0.
       if (MODE === "arc" && (-out) * phiCmd > 0) {

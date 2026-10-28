@@ -18,8 +18,10 @@
      En Three.js (rotation anti-horaire autour de +Z), cela donne :
        corps  .rotation.z = −θ(rad)
        roues  .rotation.z = −(θ + φ)(rad)   (spin des roues, φ = angle servo)
-   - Roulement sans glissement (cohérent avec le Lagrange du contrat) :
-       x_centre = R · (θ + φ)   (R = 41,5 mm = rayon de roulement WHEEL_R)
+   - Roulement sans glissement (cohérent avec le Lagrange du moteur) :
+       x_centre = R · (θ + φ)
+     R ici est le rayon DYNAMIQUE d'engine.js (41,5 mm, selfcheck figé).
+     La hauteur visuelle de l'axe est meta.rayonRoulement (42 mm, cotes.AXLE_Z).
      à lacet nul ; avec le lacet ψ (couche déplacement du moteur : différentiel
      des roues sur la voie), la pose au sol est intégrée par le moteur
      (state.posX / posZ, m) et le robot tourne de −ψ autour de +Y (ψ > 0 =
@@ -52,9 +54,12 @@
   var BE = window.BalanceEngine;
   var US = window.Ultrason;
 
-  // Constante géométrique du rendu (pas de physique ici) : rayon de roulement
-  // WHEEL_R = 41,5 mm (gen_bitcoin_bot.py) — l'axe des roues est à 41,5 mm du sol.
-  var R = 0.0415;
+  // Hauteur VISUELLE de l'axe. Le moteur (engine.js) garde R = 0,0415 :
+  // les références de selfcheck.js sont figées dessus. Le maillage, lui,
+  // a son axe à 42 mm (cotes.AXLE_Z) — meta.rayonRoulement, écrit par
+  // l'exporteur. Repli 0,042 si parts.js n'a pas encore de meta.
+  var meta = (window.BALANCEBOT_PARTS && window.BALANCEBOT_PARTS.meta) || {};
+  var R = (typeof meta.rayonRoulement === "number") ? meta.rayonRoulement : 0.042;
 
   // ---- État du viewer ----
   var sim = BE.create(BE.defaults);
@@ -100,7 +105,7 @@
 
   // ── JEUX DE GAINS ────────────────────────────────────────────────────
   // `embarques` = ce qui est FLASHÉ dans le firmware : il TOMBE (0/6 scénarios
-  // mesurés) — c'est le constat de FIRMWARE_REVIEW.md §1bis, la raison même de
+  // mesurés) — c'est le constat de docs/revues/FIRMWARE_REVIEW.md §1bis, la raison même de
   // la campagne de réglage. `tient` = meilleur jeu trouvé au banc (5/6), la
   // cascade étant neutralisée (Kv = 0 : à Kv = 3 elle sature et fait tomber).
   var JEUX = {
@@ -622,7 +627,7 @@
   camera.position.set(0.34, 0.20, 0.38);           // trois-quarts devant
 
   var controles = new THREE.OrbitControls(camera, renderer.domElement);
-  controles.target.set(0, 0.10, 0);                // mi-hauteur du corps ₿ (201 mm, axe à 41,5 mm)
+  controles.target.set(0, 0.10, 0);                // mi-hauteur du corps (z ≈ 100 mm). L'axe à 42 mm ne la déplace pas.
   controles.enableDamping = true;
   controles.dampingFactor = 0.08;
   controles.minDistance = 0.10;
@@ -772,8 +777,8 @@
 
   // Position sur la face avant (repère viewer, m) : la coque avant s'étend
   // jusqu'à x = 23 mm (parts.js, b_front) ; lobe haut du ₿, au-dessus de
-  // l'écran (y = +30,5 mm), centré en Z — les yeux de la photo réelle.
-  var US_X = 0.023, US_Y = 0.098;
+  // l'écran, centré en Z — les yeux de la photo réelle. `yeuxY` suit l'axe.
+  var US_X = 0.023, US_Y = (typeof meta.yeuxY === "number") ? meta.yeuxY : 0.0975;
   var moduleUS = moduleHCSR04();
   moduleUS.position.set(US_X, US_Y, 0);
   groupeCorps.add(moduleUS);
@@ -840,8 +845,10 @@
   // À ψ = 0 (pas de pivot) on retrouve exactement dx = x_face − x_sonde.
   // Ni la hauteur (mesure horizontale) ni le tangage de la sonde ne
   // comptent : l'écho revient de la face verticale, comme avant.
-  // Le pan de la tête NE tourne PAS le faisceau : sur le châssis v3 le
-  // capteur est fixé au corps (ROADMAP 4.4 : la tête pan/tilt n'existe pas).
+  // Le pan de la tête NE tourne PAS le faisceau. Le firmware a le code
+  // pan/tilt (head.cpp) ; le châssis v3 n'a pas la mécanique (ROADMAP 4.4).
+  // Le HC-SR04 imprimé est fixé au corps : la mesure suit le corps, pas
+  // l'angle de pan. L'angle de pan sert seulement au côté de l'évitement.
   var LOBE_DEMI_ANGLE_DEG = 15;
   function distanceReelleCm() {
     var st = sim.state;
@@ -898,9 +905,11 @@
     new THREE.PlaneGeometry(0.056, 0.026),
     new THREE.MeshBasicMaterial({ map: faceTex })   // dalle auto-lumineuse (non éclairée)
   );
-  // Centre de la fenêtre écran (repère design → repère viewer, voir en-tête) :
-  // (X=59,5 ; y=18,0 ; Z=72,0) mm design → (18,0 ; 72,0−41,5 ; 59,5−64,565) mm.
-  ecran.position.set(0.018, 0.0305, -0.005065);
+  // Centre de la dalle, exporté avec les pièces (cotes.ecran_viewer) :
+  // (y = 18 mm, z = 72 − axe, x = 59,5 − milieu des faces de roue).
+  // Repli si meta manque : cotes.ecran_viewer() après recentrage (milieu = 59).
+  var ecranPos = meta.ecran || [0.018, 0.030, 0.0005];
+  ecran.position.set(ecranPos[0], ecranPos[1], ecranPos[2]);
   ecran.rotation.y = Math.PI / 2;        // la dalle regarde vers l'avant (+x)
   groupeCorps.add(ecran);                // solidaire du corps : tangue avec θ
 

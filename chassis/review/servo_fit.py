@@ -22,22 +22,40 @@ from mathutils import Matrix
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, ".."))
+import cotes  # noqa: E402
 import sg90_model as SG  # noqa: E402
 
 argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
-STLDIR = argv[0] if argv else os.path.join(HERE, '..', 'v3')
-CLR = float(argv[1]) if len(argv) > 1 else 0.0   # jeu de montage ajouté au servo
+args = [a for a in argv if not a.startswith('--')]
+STLDIR = args[0] if args else os.path.join(HERE, '..', 'v3')
+CLR = float(args[1]) if len(args) > 1 else 0.0   # jeu de montage ajouté au servo
 
 # ── constantes reprises telles quelles de gen_bitcoin_bot.py ────────────────
 GW, GH, Z0 = 118.0, 165.0, 26.0
 STROKE, WALL = 19.0, 2.4
 Z_MID = Z0 + GH * 0.50
 LOW = dict(zb=Z0, zt=Z_MID + STROKE * 0.5, xr=GW)
-AXLE_Z = 42.0
+AXLE_Z = cotes.AXLE_Z
+# Le recentrage allonge un tube et raccourcit l'autre. Les baies servo,
+# elles, ne bougent pas : ce script le vérifie par l'intersection, et
+# refuse de tourner si les cotes ne sont plus celles du recentrage appliqué.
+_prop = cotes.proposition_recentrage()
+if not _prop["applique"] or abs(_prop["ecart_roues_mm"]) > 1e-6:
+    raise SystemExit("servo_fit : le recentrage n'est pas appliqué")
+if abs(_prop["entraxe_faces_mm"] - _prop["entraxe_symetrique_mm"]) > 1e-6:
+    raise SystemExit("servo_fit : la voie des faces a changé")
+if abs(SG.SG_TAB - cotes.SERVO_TAB) > 1e-9:
+    raise SystemExit("servo_fit : SG_TAB et cotes.SERVO_TAB divergent")
+_p4 = cotes.plot_vis4()
+if _p4["gap_oreille"] < 0.25 or _p4["gap_face"] < 0.25 or _p4["engagement"] < 3.2:
+    raise SystemExit("servo_fit : le plot de la 4e vis n'a plus son jeu")
 
 r_low = (LOW['zt'] - LOW['zb']) / 2
 cz_low = (LOW['zt'] + LOW['zb']) / 2
 X_WALL_R = (LOW['xr'] - r_low) + math.sqrt(r_low ** 2 - (AXLE_Z - cz_low) ** 2)
+if abs(X_WALL_R - cotes.X_WALL_R) > 1e-6:
+    raise SystemExit("servo_fit : X_WALL_R diverge de cotes.py")
 
 
 def raz():

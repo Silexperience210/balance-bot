@@ -30,17 +30,17 @@ MODE = argv[0] if argv else "still"
 # plage d'images optionnelle pour les essais : `-- cine 560 566`
 DEB, FIN = (int(argv[1]), int(argv[2])) if len(argv) >= 3 and argv[1].isdigit() else (1, None)
 
-# ── cotes du projet — SOURCE : chassis/gen_bitcoin_bot.py ─────────────────
-# AXLE_Z = WHEEL_R = WHEEL_D/2 − GROOVE_D + TIRE_T = 40 − 0.5 + 2.5 = 42.0
-AXLE_Z = 42.0
-X_MID = 64.57          # centre de l'enveloppe du corps (mesuré sur b_front)
+# ── cotes du projet — SOURCE : chassis/cotes.py ───────────────────────────
+sys.path.insert(0, os.path.join(ROOT, "chassis"))
+import cotes  # noqa: E402
+AXLE_Z = cotes.AXLE_Z
+_face_g, _face_d, X_MID, _entraxe = cotes.roues_apres_miroir()
 Y_AXLE = 0.0           # l'axe des roues est dans le plan de joint (y = 0)
-# Roues : origine = FACE EXTERNE du disque imprimé (cf. assemblage_pour_rendu) ; le
-# moyeu (13 mm) part vers l'intérieur, son bout tombe sur le plan de la paroi
-# (xL = GW − x_wall_R + 1 = 12.13 ; xR = GW − 1 = 117.0).
-# « D » = côté paroi courbe (x≈11) ; « G » = côté spine (x≈118).
-ROUE = {"D": (-8.87, +1), "G": (138.00, -1)}       # (x origine, sens du moyeu)
-PNEU = {"D": -8.37, "G": 137.50}                   # origine de la bande TPU
+# Origine = face externe. D = panse (x petit, moyeu long), G = spine.
+_dt = (cotes.WHEEL_W - cotes.TIRE_W) / 2.0
+ROUE = {"D": (_face_g, +1), "G": (_face_d, -1)}
+PNEU = {"D": _face_g + _dt, "G": _face_d - _dt}
+_STL_ROUE = {"D": "coin_wheel_panse.stl", "G": "coin_wheel_spine.stl"}
 SERVO = {"D": 24.93, "G": 104.35}                  # x du centre du corps de servo
 SERVO_BRIDE = {"D": 13.53, "G": 115.60}            # x de la platine (côté sortie)
 SERVO_Z = 47.50                # corps z∈[36.1, 58.9] → arbre à 42 (= axe)
@@ -216,7 +216,7 @@ corps += servos
 roues, pneus = [], []
 for cote in ("D", "G"):
     x, sens = ROUE[cote]
-    r = importer(f"roue_{cote}", os.path.join(V3, "coin_wheel.stl"), M_NOIR)
+    r = importer(f"roue_{cote}", os.path.join(V3, _STL_ROUE[cote]), M_NOIR)
     r.rotation_mode = "QUATERNION"
     r.rotation_quaternion = Quaternion((0, 1, 0), sens * math.pi / 2)
     r.location = (x, Y_AXLE, AXLE_Z)

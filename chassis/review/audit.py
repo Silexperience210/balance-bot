@@ -89,7 +89,8 @@ def orient_stats(mesh):
 files = {
     "b_front": os.path.join(V3, "b_front.stl"),
     "b_back": os.path.join(V3, "b_back.stl"),
-    "coin_wheel": os.path.join(V3, "coin_wheel.stl"),
+    "coin_wheel_panse": os.path.join(V3, "coin_wheel_panse.stl"),
+    "coin_wheel_spine": os.path.join(V3, "coin_wheel_spine.stl"),
     "coin_tire": os.path.join(V3, "coin_tire.stl"),
 }
 for name, path in files.items():

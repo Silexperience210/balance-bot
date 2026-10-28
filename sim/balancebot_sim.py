@@ -8,7 +8,7 @@ angle de servo imposé).
 
 RÈGLE D'OR : mêmes boucles, mêmes constantes, mêmes SIGNES que balance.cpp.
 Deux écarts de signe (boucle interne de la cascade, soft clamp) ont vécu ici
-8 jours sans être vus (REVIEW_CLAUDE.md M1, M2) : toute modification de
+8 jours sans être vus (docs/revues/REVIEW_CLAUDE.md M1, M2) : toute modification de
 balance.cpp se porte ici le même jour, et réciproquement.
 
 Usage :
@@ -34,7 +34,7 @@ Aux petits angles : θ̈ = g·h/(R+h)²·θ − R/(R+h)·φ̈, pôle instable
 θ̈ = [(g/h)·sinθ − (R/h)·φ̈·cosθ]/(1 + (R/h)·cosθ) oubliait le couple de
 réaction du servo sur le corps (le servo est vissé sur le corps) et le terme
 centrifuge : même autorité de commande, mais gravité g/(R+h) = 87,2 s⁻² au
-lieu de 62,0 (pôle 9,34 rad/s), ~19 % trop pessimiste (REVIEW_CLAUDE.md M5).
+lieu de 62,0 (pôle 9,34 rad/s), ~19 % trop pessimiste (docs/revues/REVIEW_CLAUDE.md M5).
 
 Servo : suivi de la consigne de position en 1er ordre (τ = 50 ms) borné à
 250 °/s. Course de pied bornée à ±45° (butée dure de feet.cpp).
@@ -50,7 +50,7 @@ Servo : suivi de la consigne de position en 1er ordre (τ = 50 ms) borné à
 · ni la friction (conservateur), ni la 3D, ni la masse des pieds ;
 · le retard de mesure tau_f = 25 ms (ctrl()) est un forfait « retard total de
   boucle » NON justifié finement — le verdict sur les gains embarqués en
-  dépend (REVIEW_CLAUDE.md §2 #9).
+  dépend (docs/revues/REVIEW_CLAUDE.md §2 #9).
 Le réglage réel reste indispensable.
 
 ​── État de validation (mesuré, 17/09/2026 — MÉCANIQUE ROUE, R = 41,5 mm) ───
@@ -69,7 +69,10 @@ pour CHERCHER des gains, pas pour certifier ceux qui sont embarqués.
 import math, random, sys
 
 # ── Paramètres physiques ─────────────────────────────────────────────
-G, R, H = 9.81, 0.0415, 0.080       # gravité, rayon de ROULAGE (pneu Ø83 → 41,5 mm), hauteur CoM (m)
+G, R, H = 9.81, 0.0415, 0.080       # gravité, rayon DYNAMIQUE figé (selfcheck), hauteur CoM (m)
+# 41,5 mm = rayon du pneu non étiré (Ø83 / 2). Le châssis pose l'axe au
+# rayon monté, 42,0 mm (chassis/cotes.py AXLE_Z). Ne pas « corriger » R :
+# sim/web/selfcheck.js compare la trajectoire à 1e-12.
 TAU_SERVO, VMAX_SERVO = 0.05, 250.0  # servo : 1er ordre (s), vitesse max (°/s)
 DT = 1.0 / 200                       # pas de contrôle = 200 Hz (comme le code)
 
@@ -100,11 +103,14 @@ SETPOINT_DEG = 0.0                   # kSetpointDeg
 TILT_PER_CMD = 0.06                  # kTiltPerCmd  : ° de consigne par unité de cmdForward
 TURN_PER_CMD = 0.30                  # kTurnPerCmd  : unités de sortie par unité de cmdTurn
 CMD_SLEW_PER_S = 200.0               # kCmdSlewPerS : lissage des consignes (unités/s)
-# Voie des roues (m), plans médians des pneus : faces externes des roues à
-# 146,87 mm (chassis/assets/exporter_parts_web.py TRACK), pneu centré 4 mm en
-# dedans → 138,87 mm. Sert UNIQUEMENT à la cinématique du lacet ci-dessous —
-# le firmware n'a ni cap ni odométrie (head.cpp l.10-15), le lacet est une
-# grandeur du SIMULATEUR (pour voir le pivot), pas une grandeur du robot.
+# Voie FIGÉE des plans médians de pneu (m), pour le lacet du simulateur.
+# Historique : faces externes à 146,87 mm, pneu centré 4 mm en dedans
+# → 138,87 mm. Les faces STL sont à 150,13 mm (cotes.ENTRAXE_SYM_MM).
+# Le recentrage sur le glyphe déplace le milieu, pas cet entraxe : on
+# NE met PAS à jour ce nombre. selfcheck.js le compare au bit. Le
+# firmware n'a ni cap ni odométrie : le lacet est une grandeur du
+# simulateur. Le rayon dynamique R = 0,0415 a le même statut. L'axe
+# géométrique du châssis est à 42,0 mm.
 TRACK = 0.13887
 
 
@@ -154,7 +160,7 @@ class Sim:
         # voies gyro et accel se somment à 1 ; 0,25 s est sa fréquence de
         # croisement, pas un lag). Valeur non justifiée finement : avec 25 ms les
         # gains embarqués sont linéairement instables, sans ils sont marginaux
-        # (REVIEW_CLAUDE.md §2 #9) — le verdict du sim en dépend.
+        # (docs/revues/REVIEW_CLAUDE.md §2 #9) — le verdict du sim en dépend.
         tau_f = 0.025
         pt, rt = self.theta * 180 / math.pi, self.dtheta * 180 / math.pi
         self.pitch_f += ((pt + random.gauss(0, noise * 0.15)) - self.pitch_f) * (DT / tau_f)
@@ -192,7 +198,7 @@ class Sim:
 
         # boucle INTERNE (200 Hz) : contribution à θ_ref.
         # SIGNE NON TRANCHÉ — à décider en réel, commencer kv = 0 au banc web
-        # (REVIEW_CLAUDE.md M1). Aligné sur balance.cpp recenterSetpoint() :
+        # (docs/revues/REVIEW_CLAUDE.md M1). Aligné sur balance.cpp recenterSetpoint() :
         # −kRecenterKv·(v_cible − φ̇). De 6aabd3c à ce jour, ce sim portait le
         # signe (+) pendant que le firmware avait (−) — règle d'or violée. La
         # « preuve » par simulation du signe (−) est caduque (le sim ne tenait
@@ -216,7 +222,7 @@ class Sim:
             self.integ = cand
         out = max(-OUT_MAX, min(OUT_MAX, p + self.integ + d))
         # soft clamp de butée (feet.cpp fournit φ intégré = phi_cmd).
-        # ATTENTION AU SIGNE (REVIEW_CLAUDE.md M2) : `out` est la sortie PID NON
+        # ATTENTION AU SIGNE (docs/revues/REVIEW_CLAUDE.md M2) : `out` est la sortie PID NON
         # inversée ; la vitesse de pied réelle est u = −out (run()). Le pied
         # pousse vers la butée quand u·φ > 0 ⇔ (−out)·φ > 0 — c'est ce que teste
         # balance.cpp (limitTowardStop après l'inversion : out·footAvg ≤ 0 →

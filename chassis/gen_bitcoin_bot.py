@@ -3,18 +3,21 @@
 #  ₿ BalanceBot v3 — châssis « symbole Bitcoin » (généré par Hermes)
 #
 #  Robot auto-équilibré 2 roues. Le CORPS est le glyphe ₿ vu de face, debout.
-#  Roues = pièces ₿ Ø70 (+ pneu TPU). Servos 9 g rotation continue (SG90 size).
+#  Roues = pièces ₿ Ø80 (+ pneu TPU Ø83). Servos 9 g rotation continue (SG90 size).
 #
 #  REPÈRE : X = gauche→droite (face), Y = arrière→avant (profondeur), Z = haut.
 #  Face AVANT = y = +DEPTH/2 ; plan de joint des coques = y = 0.
 #  Sol z = 0 ; axe des roues z = WHEEL_R (rayon de roulement avec pneu).
 #
 #  Impression : b_front / b_back COUCHÉES (face externe sur le plateau, cavités
-#  vers le haut), coin_wheel face externe en bas, pneu TPU à plat. Zéro support.
+#  vers le haut), roues face ₿ en bas (panse et spine, deux STL), pneu à plat.
 # =============================================================================
 import math, os, sys
 import bmesh, bpy
 from mathutils import Vector, Matrix
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cotes
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'v3')
 os.makedirs(OUT, exist_ok=True)
@@ -51,24 +54,23 @@ CHAM = 1.2                  # chanfrein arêtes extérieures
 COUNTER = 1.6                 # creux des contre-poinçons (1.6 : supports minuscules, review v3.1)
 LEG_H = 14.0                # barres du bas → z = Z0-LEG_H = 12 → garde au sol 12 (v3.1)
 
-# ── Roues ────────────────────────────────────────────────────────────────────
-WHEEL_D, WHEEL_W = 80.0, 8.0    # v3.1 : Ø80, allégée (6 bras, voir build_wheel)
-GROOVE_D, GROOVE_W = 0.5, 7.0   # gorge de bande de roulement sur la jante
-TIRE_T, TIRE_W = 2.5, 7.0       # bande TPU pleine, montée en tension (Ø int. < Ø fond de gorge)
-TIRE_STRETCH = 1.0              # interférence diamétrale
-WHEEL_R = WHEEL_D/2 - GROOVE_D + TIRE_T   # 41.5 rayon de roulement → axe z
-AXLE_Z = WHEEL_R
-HUB_BORE_D = SV_SHAFT_D + 0.4
-HUB_CB_D, HUB_CB_H = SV_BOSS_D + 0.6, SV_BOSS_H + 0.2
-HORN_ARM_W, HORN_ARM_L, HORN_T = 5.2, 20.0, 1.8   # empreinte palonnier en croix 21T (4 bras)
-HORN_SCREW_R0, HORN_SCREW_R1 = 3.7, 6.3
-# Moyeu-tube : la roue porte un tube Ø HUB_D × HUB_L côté interne, guidé dans un tube-palier du corps (Ø HUB_D + 0.5).
-# Le palonnier en croix (21 mm !) du servo s'emboîte au FOND du moyeu → Ø ≥ 24 pour le loger sans le couper.
-# L'axe servo n'est jamais en flexion, le palier reprend les efforts radiaux.
-HUB_D, HUB_L = 24.0, 13.0
-BEAR_D = HUB_D + 0.5        # alésage du palier dans le corps
-BEAR_WALL = 1.0             # paroi du tube-palier (Ø ext 26.5 → bas du tube à z = 36.5-13.25 = 23.25 > plancher cavité 22.4 : pas de sliver)
-WHEEL_GAP = 1.0             # jeu roue / corps
+# ── Roues et chaîne d'entraînement — SOURCE : chassis/cotes.py ──────────────
+# Ne pas redéfinir ces cotes ici. Le commentaire historique « 41,5 mm » était
+# le rayon du pneu NON étiré (Ø83 / 2). L'axe est au rayon MONTÉ, 42,0 mm.
+WHEEL_D, WHEEL_W = cotes.WHEEL_D, cotes.WHEEL_W
+GROOVE_D, GROOVE_W = cotes.GROOVE_D, cotes.GROOVE_W
+TIRE_T, TIRE_W = cotes.TIRE_T, cotes.TIRE_W
+TIRE_STRETCH = cotes.TIRE_STRETCH
+WHEEL_R = cotes.WHEEL_R
+AXLE_Z = cotes.AXLE_Z
+HUB_BORE_D = cotes.HUB_BORE_D
+HORN_ARM_W, HORN_ARM_L, HORN_T = cotes.HORN_ARM_W, cotes.HORN_ARM_L, cotes.HORN_T
+HUB_D = cotes.HUB_D
+HUB_PANSE, HUB_SPINE = cotes.HUB_PANSE, cotes.HUB_SPINE
+BEAR_D, BEAR_WALL = cotes.BEAR_D, cotes.BEAR_WALL
+WHEEL_GAP = cotes.WHEEL_GAP
+assert (GW, WALL, SV_BOSS_D, SV_BOSS_H, SV_SHAFT_D) == (
+    cotes.GW, cotes.WALL, cotes.SV_BOSS_D, cotes.SV_BOSS_H, cotes.SV_SHAFT_D)
 
 # =============================================================================
 #  OUTILLAGE BPY (v2)
@@ -218,7 +220,11 @@ def bbox(ob):
 
 def exporter(ob, chemin):
     bpy.ops.object.select_all(action='DESELECT'); ob.select_set(True); bpy.context.view_layer.objects.active = ob
-    bpy.ops.wm.stl_export(filepath=chemin, export_selected_objects=True, global_scale=1.0, ascii_format=False, apply_modifiers=True)
+    # Blender ≥ 4.2 : wm.stl_export. Le paquet Ubuntu 4.0 n'a que export_mesh.stl.
+    if 'stl_export' in dir(bpy.ops.wm):
+        bpy.ops.wm.stl_export(filepath=chemin, export_selected_objects=True, global_scale=1.0, ascii_format=False, apply_modifiers=True)
+    else:
+        bpy.ops.export_mesh.stl(filepath=chemin, use_selection=True, global_scale=1.0, ascii=False, use_mesh_modifiers=True)
     ob.select_set(False); b = bbox(ob)
     print(f"  [STL] {os.path.basename(chemin):16s} {b[1]-b[0]:6.2f} x {b[3]-b[2]:6.2f} x {b[5]-b[4]:6.2f} mm | {len(ob.data.polygons)} faces")
     return b
@@ -304,13 +310,14 @@ def build_body():
     ajouts = []
     # ── Servos : couchés, axe selon X, sortant par les parois latérales à z = AXLE_Z.
     #    Le corps (SV_L=22.8 selon Z, SV_W=12.2 selon Y, SV_H=22.5 selon X) est monté TÊTE EN BAS :
-    #    l'axe (à SV_SHAFT_OFF du bout) est en BAS → corps de z = AXLE_Z-5.9 = 30.7 à 53.5, au-dessus du plancher (22.4).
+    #    l'axe (à SV_SHAFT_OFF du bout) est en BAS → corps de z = AXLE_Z−5,9 = 36,1 à 58,9.
     #    Fixation standard : le servo traverse une CLOISON verticale (⊥ X) par une fenêtre 22.8×12.2 ; les pattes
     #    (SV_FLANGE_Z=15.9 du fond, 2.5 épaisses, 32.2 d'envergure) s'appuient sur la face intérieure de la cloison.
     r_low = (LOW['zt'] - LOW['zb'])/2; cz_low = (LOW['zt'] + LOW['zb'])/2
     x_wall_R = (LOW['xr'] - r_low) + math.sqrt(r_low**2 - (AXLE_Z - cz_low)**2)   # paroi courbe droite à la hauteur de l'axe
     z_sv0, z_sv1 = AXLE_Z - SV_SHAFT_OFF, AXLE_Z - SV_SHAFT_OFF + SV_L
     servo_x = []   # (x_face_boss, direction vers l'intérieur, x face d'appui des oreilles)
+    semelles = []  # union APRÈS la rainure servo : sinon SV_CLR en mange le dessus
     # Les 2 servos sont collés à leur paroi (face de sortie = face interne de la paroi) ; les tubes-paliers sont EXTERNES.
     #
     # CORRECTION 10/09 — la cloison tombait PILE dans le volume des oreilles.
@@ -334,19 +341,36 @@ def build_body():
         booleen(bulk, glyph_solids(y_cav_b - 3, y_cav_f + 3, inset=WALL - 0.6), 'INTERSECT')   # jamais hors de la peau
         ajouts.append(bulk)
         servo_x.append((x_face, d, x_bulk_in))
-    # ── Tubes-paliers EXTERNES (coaxiaux, z = AXLE_Z, y = 0), Ø BEAR_D + 2·BEAR_WALL. Le moyeu Ø24 × 13 de la roue tourne dedans.
-    #    Côté panse : la panse déborde jusqu'à x=GW à z=66.8 → plan interne roue à x_in_R = GW + GAP.
-    #    Côté spine : MÊME longueur de tube (roues identiques, voie centrée sur GW/2) → x_in_L = GW − x_in_R = −GAP…
-    #    mais la panse impose un tube de 12 mm à droite ; on met 12 mm à gauche aussi et on garde le centre à GW/2 :
-    TUBE = (GW + WHEEL_GAP) - x_wall_R            # ≈ 12.0
-    x_in_R = x_wall_R + TUBE                      # = GW + GAP
-    x_in_L = -TUBE                                # tube externe 12 mm côté spine
-    # (voie asymétrique de (x_in_R − GW) − TUBE = 1 − 12 = −11 mm par rapport au centre du glyphe : compensée par le
-    #  décalage du CENTRE DE MASSE → la batterie est côté panse. Voir bilan des masses dans NOTES.)
-    # Ancrage : le manchon-palier ne pénètre QUE l'épaisseur de la paroi (1.4 mm — union franche sans entrer dans la
-    # cavité, pour ne pas bloquer le montage du servo ni frôler le plancher). Ø ext 26.5 → bas du tube à 23.25 > plancher 22.4.
-    tube_R = cylindre('tubeR', BEAR_D + 2*BEAR_WALL, (x_in_R + 0.5) - (x_wall_R - 1.4), 'X', (((x_in_R + 0.5) + (x_wall_R - 1.4))/2, 0.0, AXLE_Z))
-    tube_L = cylindre('tubeL', BEAR_D + 2*BEAR_WALL, (WALL - 1.0) - (x_in_L - 0.5), 'X', (((WALL - 1.0) + (x_in_L - 0.5))/2, 0.0, AXLE_Z))
+        # Semelle sous le corps du servo. L'oreille basse de la panse est hors
+        # du cercle : la vis passe dans un plot ajouté plus bas, la semelle
+        # empêche seulement le servo de descendre dans le jeu de baie. Elle
+        # est unionnée APRÈS la rainure `svwin`, sinon SV_CLR en rabote le
+        # dessus. Son dessus est
+        # cotes.SHELF_DROP sous le corps nominal (0,7 = 0,5 d'enveloppe de
+        # bavure non mesurée + 0,2 de jeu) pour que servo_fit reste à 0 mm³.
+        # 8 → 14 mm : après les oreilles (6,6), avant la sortie de câble
+        # (à ~17 mm de la face, côté bout court).
+        x_s0 = x_face + d * 8.0
+        x_s1 = x_face + d * 14.0
+        shelf = boite('shelf', min(x_s0, x_s1), max(x_s0, x_s1),
+                       -(SV_W / 2 - 0.4), SV_W / 2 - 0.4,
+                       z_sv0 - cotes.SHELF_DROP - 2.4, z_sv0 - cotes.SHELF_DROP)
+        booleen(shelf, glyph_solids(y_cav_b - 1, y_cav_f + 1, inset=WALL - 0.4), 'INTERSECT')
+        semelles.append(shelf)
+    # ── Tubes-paliers EXTERNES (coaxiaux, z = AXLE_Z, y = 0).
+    #    Recentrage APPLIQUÉ (cotes.proposition_recentrage, applique=True).
+    #    Les peaux restent où elles sont (milieu ≈ 53,4 mm, glyphe à 59).
+    #    Le tube panse (ici +X, avant miroir) est allongé de delta, le tube
+    #    spine raccourci d'autant. La somme ne change pas : la boîte des
+    #    coques et la voie des pneus non plus. Deux moyeux, deux STL.
+    #    L'ancien « −11 mm » était une arithmétique fausse sur la longueur
+    #    de tube, pas un décalage. Détail : chassis/RECENTRAGE.md.
+    x_in_R = x_wall_R + cotes.TUBE_PANSE
+    x_in_L = -cotes.TUBE_SPINE
+    # Ancrage 1,4 mm dans la paroi (union franche, sans entrer dans la baie).
+    # Ø ext 26,5 → bas du tube à AXLE_Z − 13,25 ≈ 28,8 > plancher de cavité.
+    tube_R = cylindre('tubeR', BEAR_D + 2*BEAR_WALL, (x_in_R + cotes.TUBE_OVER) - (x_wall_R - 1.4), 'X', (((x_in_R + cotes.TUBE_OVER) + (x_wall_R - 1.4))/2, 0.0, AXLE_Z))
+    tube_L = cylindre('tubeL', BEAR_D + 2*BEAR_WALL, (WALL - 1.0) - (x_in_L - cotes.TUBE_OVER), 'X', (((WALL - 1.0) + (x_in_L - cotes.TUBE_OVER))/2, 0.0, AXLE_Z))
     for tb in (tube_R, tube_L):
         booleen(env, tb, 'UNION')
     # ── Piédestal MPU6050 : DESSUS à z = AXLE_Z (axe de tangage = axe des roues), entre les 2 servos
@@ -406,18 +430,27 @@ def build_body():
         outils.append(cylindre('mpupil', SV_PILOT_D, 8.0, 'Z', (MPU_X + sx*MPU_HOLE_PITCH/2, 0.0, AXLE_Z - MPU_T - 3.0)))
     # ── Lumière USB-C sous la carte (USB-C vers le BAS) : 12 × 8 dans le plancher bas de la panse basse
     outils.append(boite('usb', lcx-6, lcx+6, y_pcb - 2.0, y_cav_f + 1, LOW['zb']-1, LOW['zb']+WALL+1))
-    # ── Alésages des tubes-paliers : Ø BEAR_D du plan de roue jusqu'à la face interne de la paroi (le moyeu y tourne ;
-    #    le bossage/axe/palonnier du servo est dans le moyeu).
-    # ── Alésages des tubes-paliers LIMITÉS AU TUBE (ne touchent pas la paroi : quasi-coplanarités → EXACT instable)
-    #    Ø BEAR_D de 79.2 (fond, après l'épaulement d'ancrage) à 92.5 ; côté gauche de -12.5 à -0.2.
-    #    Les alésages DÉPASSENT le bout des tubes de 2 mm (09/09) : un fond d'alésage coplanaire au bout
-    #    du tube laissait un voile Ø24.5 d'épaisseur nulle dans le palier (artefact EXACT → moyeu freiné).
-    x_bearR_out, x_bearL_out = x_in_R + 2.5, -14.0
-    outils.append(cylindre('bearR', BEAR_D, x_bearR_out - (x_wall_R + 0.2), 'X', ((x_bearR_out + (x_wall_R + 0.2))/2, 0.0, AXLE_Z)))  # palier droit : entrée x_in_R+0.5 → fond x_wall_R+0.2 (épaulement 1.6 mm, symétrique de bearL)
-    outils.append(cylindre('bearL', BEAR_D, -0.2 - x_bearL_out, 'X', ((-0.2 + x_bearL_out)/2, 0.0, AXLE_Z)))
-    # ── Trou de passage du bossage servo (Ø 11.8 + jeu) à TRAVERS la paroi seulement, pour rejoindre l'alésage
-    outils.append(cylindre('axR', SV_BOSS_D + 1.0, WALL + 0.6, 'X', (x_wall_R - WALL/2, 0.0, AXLE_Z)))  # de x_wall_R-WALL-0.3 (cavité) à x_wall_R+0.3 (tube) : traverse la paroi ENTIÈRE (valeur review Grok)
-    outils.append(cylindre('axL', SV_BOSS_D + 1.0, 2.6 - (-0.4), 'X', ((2.6 + (-0.4))/2, 0.0, AXLE_Z)))
+    # ── Alésages Ø BEAR_D. L'épaulement est DANS la paroi (u = SHOULDER_U depuis
+    #    la face servo), pour qu'un palonnier posé sur le bossage ne frotte pas
+    #    la peau. L'alésage dépasse le bout du tube (BORE_OVER) : un fond
+    #    coplanaire laissait un voile d'épaisseur nulle (09/09).
+    #    Le trou d'axe = cylindre du bossage rond UNION rectangle du capot
+    #    oblong mesuré sur Servo-SG90.stl. Il débouche dans l'alésage.
+    def _x_u(x_face, d, u):
+        return x_face - d * u          # u = 0 sur la face servo, u > 0 vers la roue
+
+    for nom, x_face, d, x_out in (
+            ('R', x_wall_R - WALL, -1, x_in_R + cotes.TUBE_OVER + cotes.BORE_OVER),
+            ('L', WALL, +1, x_in_L - cotes.TUBE_OVER - cotes.BORE_OVER)):
+        x_sh = _x_u(x_face, d, cotes.SHOULDER_U)
+        outils.append(cylindre('bear' + nom, BEAR_D, abs(x_out - x_sh), 'X', ((x_out + x_sh) / 2, 0.0, AXLE_Z)))
+        x_cav = _x_u(x_face, d, -0.6)                              # déborde dans la cavité
+        x_thru = _x_u(x_face, d, cotes.SHOULDER_U + 0.6)           # débouche dans l'alésage
+        outils.append(cylindre('ax' + nom, cotes.AXLE_HOLE_D, abs(x_thru - x_cav), 'X',
+                               ((x_cav + x_thru) / 2, 0.0, AXLE_Z)))
+        outils.append(boite('hump' + nom, min(x_cav, x_thru), max(x_cav, x_thru),
+                            -cotes.CAP_HALF_Y, cotes.CAP_HALF_Y,
+                            AXLE_Z - cotes.CAP_Z_SHORT, AXLE_Z + cotes.CAP_Z_LONG))
     # ── Fenêtres servo dans les cloisons (SV_L × SV_W + SV_CLR par face) + avant-trous Ø1.7 des pattes
     #    Le servo se pose LATÉRALEMENT (selon Y, par le plan de joint ouvert) : la fenêtre est une
     #    RAINURE débouchant en y = 0, le corps y descend, les oreilles viennent porter sur x_bulk_in.
@@ -448,6 +481,28 @@ def build_body():
     # ── Passe-fils entre panse basse et haute : ouverture dans la cloison à z = Z_MID
     outils.append(boite('pass', SPINE_W + 4, SPINE_W + 16, y_cav_b - 1, y_cav_f + 1, Z_MID - 6, Z_MID + 6))
     soustraire(env, outils)
+    for shelf in semelles:
+        booleen(env, shelf, 'UNION')
+    # ── Plot de la 4e vis (oreille basse, panse). La peau à z du trou est
+    #    en deçà de la face d'oreille : on ne gonfle pas le cercle. Le plot
+    #    est dans le vide entre l'oreille et la face de sortie. Deux joues,
+    #    à côté de l'oreille, le soudent à la paroi. Cotes :
+    #    cotes.plot_vis4(). L'avant-trou d'origine a été soustrait avant
+    #    cette union : on le reperce à travers le plot.
+    p4 = cotes.plot_vis4()
+    # Un seul solide avant de toucher la coque : les faces du plot et des
+    # joues ne sont pas coplanaires, sinon le booléen EXACT laisse un voile.
+    morceaux = [boite('plot_vis4', p4['x0'], p4['x1'], p4['y0'], p4['y1'], p4['z0'], p4['z1'])]
+    for sy in (1, -1):
+        morceaux.append(boite('joue_vis4', p4['joue_x0'], p4['x1'] - 0.40,
+                              sy * p4['joue_y0'], sy * p4['joue_y1'],
+                              p4['joue_z0'] + 0.30, p4['joue_z1'] - 0.30))
+    plot = fusionner('plot_vis4', morceaux)
+    booleen(env, plot, 'UNION')
+    # Trou débouchant dans le plot, arrêté avant la face de sortie.
+    pil = cylindre('pil_vis4', SV_PILOT_D, (p4['x1'] + 0.20) - (p4['x0'] - 0.40), 'X',
+                   ((p4['x0'] - 0.40 + p4['x1'] + 0.20) / 2, 0.0, p4['z_hole']))
+    booleen(env, pil, 'DIFFERENCE')
     return nettoyer(env)
 
 def couper_bisect(ob, garde_plus):
@@ -497,7 +552,7 @@ def split_body(env):
     # créaient des arêtes >2 faces qui faisaient rejeter le mesh par le slicer). La vis M3×30 (tête à y≈-16.4) va
     # jusqu'à +13.6 : couverte. Le passage Ø3.4 du back (sc) traverse le joint et guide la vis jusqu'au pil.
     for k, (px, pz) in enumerate(screws):
-        booleen(env, cylindre(f'pil{k}', 2.6, 16.0, 'Y', (px, 8.5, pz)), 'DIFFERENCE')
+        booleen(env, cylindre(f'pil{k}', cotes.M3_PILOT_D, 16.0, 'Y', (px, 8.5, pz)), 'DIFFERENCE')
 
     # coupe en 2 par booléen EXACT (la géométrie est assainie : tubes Ø26.5 sans sliver → la coupe redevient fiable et referme les faces)
     front = dupliquer(env, 'b_front'); back = env; back.name = 'b_back'
@@ -533,11 +588,45 @@ def glyph_relief(scale, cx, cz, z0, z1):
     booleen(g, ctr, 'DIFFERENCE')
     return g
 
-def build_wheel():
-    """Roue-pièce ₿ : disque Ø70 × 10, face externe z=0 (₿ GRAVÉ 1.0 + liseré — face plane → s'imprime face au plateau
-    sans support), gorge de bande sur la jante, face interne prolongée par un MOYEU-TUBE Ø HUB_D × HUB_L (tourne dans le
-    palier du corps). Au fond du moyeu : alésage axe, lamage bossage, empreinte palonnier en croix + oblongs de vis."""
-    disk = cylindre('coin_wheel', WHEEL_D, WHEEL_W, 'Z', (0, 0, WHEEL_W/2), 128)
+def _secteur(nom, r0, r1, a0, a1, z0, z1, n=8):
+    """Poche entre deux rayons et deux angles (degrés), extrudée selon Z."""
+    poly = []
+    for i in range(n + 1):
+        a = math.radians(a0 + (a1 - a0) * i / n)
+        poly.append((r1 * math.cos(a), r1 * math.sin(a)))
+    for i in range(n + 1):
+        a = math.radians(a1 + (a0 - a1) * i / n)
+        poly.append((r0 * math.cos(a), r0 * math.sin(a)))
+    ob = prisme(nom, poly, 'Z', z0, z1)
+    # Le secteur d'anneau est concave : on triangule avant le booléen.
+    bm = bmesh.new(); bm.from_mesh(ob.data)
+    bmesh.ops.triangulate(bm, faces=bm.faces[:])
+    bm.to_mesh(ob.data); bm.free()
+    return ob
+
+
+def build_wheel(hub_l, nom):
+    """Roue-pièce ₿ Ø80 × WHEEL_W. Face externe z=0 (₿ gravé 1 mm, sur le plateau).
+
+    ``hub_l`` est la longueur de moyeu de CE côté (panse ou spine).
+    L'empreinte, la cavité de capot et l'alésage d'arbre partent du bout
+    du moyeu : leur profondeur ne dépend pas de ``hub_l``, tant que le
+    moyeu court les contient (cotes._verifier_pile).
+
+    Six poches ouvertes côté moyeu allègent le disque sans trouer la face :
+    le simulateur néglige la masse des roues, donc un disque plein (~54 g)
+    éloignait le vrai robot du modèle. La jante (gorge du pneu) et le moyeu
+    restent pleins.
+
+    Le moyeu reçoit, depuis son bout :
+      · une cavité ronde pour le capot du servo (il ne tourne pas avec la roue) ;
+      · une empreinte en croix assez profonde pour un palonnier posé sur le
+        bossage datasheet (1,5 mm) OU sur le capot de 4 mm ;
+      · un alésage d'arbre borgne. La face ₿ n'est pas percée : on visse le
+        palonnier sur le servo, puis on enfile la roue.
+    Les cotes et les jeux sont dans chassis/cotes.py.
+    """
+    disk = cylindre(nom, WHEEL_D, WHEEL_W, 'Z', (0, 0, WHEEL_W/2), 128)
     ring_out = cylindre('ring_o', WHEEL_D - 3.0, 0.8 + EPS, 'Z', (0, 0, 0.4 - EPS), 128)
     ring_in  = cylindre('ring_i', WHEEL_D - 6.0, 1.0, 'Z', (0, 0, 0.4), 128)
     booleen(ring_out, ring_in, 'DIFFERENCE'); booleen(disk, ring_out, 'DIFFERENCE')
@@ -550,20 +639,42 @@ def build_wheel():
     g_out = cylindre('g_o', WHEEL_D + 2.0, GROOVE_W, 'Z', (0, 0, WHEEL_W/2), 128)
     g_in  = cylindre('g_i', WHEEL_D - 2*GROOVE_D, GROOVE_W + 2, 'Z', (0, 0, WHEEL_W/2), 128)
     booleen(g_out, g_in, 'DIFFERENCE'); booleen(disk, g_out, 'DIFFERENCE')
+    # poches entre les bras, ouvertes sur la face interne (z = WHEEL_W).
+    # On dépasse de EPS pour ne pas laisser un voile coplanaire à cette face.
+    # SPOKE_DEG est la largeur du BRAS (commentaire de cotes.py). La poche
+    # occupe le reste du pas. L'ancienne formule inversait les deux : des
+    # poches de 16° et des bras de 44°, pour un allègement presque nul.
+    pas = 360.0 / cotes.SPOKE_N
+    demi = cotes.SPOKE_DEG / 2.0
+    poches = []
+    for i in range(cotes.SPOKE_N):
+        c = i * pas
+        poches.append(_secteur(f'poche{i}', cotes.SPOKE_R0, cotes.SPOKE_R1,
+                               c + demi, c + pas - demi,
+                               cotes.SPOKE_Z0, WHEEL_W + EPS))
+    soustraire(disk, poches)
     # moyeu-tube côté interne
-    hub = cylindre('hub', HUB_D, HUB_L + EPS, 'Z', (0, 0, WHEEL_W + HUB_L/2), 96)
+    hub = cylindre('hub', HUB_D, hub_l + EPS, 'Z', (0, 0, WHEEL_W + hub_l/2), 96)
     booleen(disk, hub, 'UNION')
-    zi = WHEEL_W + HUB_L                  # bout du moyeu (côté servo)
-    outils = [cylindre('bore', HUB_BORE_D, (WHEEL_W + HUB_L)*3, 'Z', (0, 0, zi/2)),
-              cylindre('cb', HUB_CB_D, HUB_CB_H + 3.0, 'Z', (0, 0, zi - (HUB_CB_H + 3.0)/2 + EPS))]   # lamage bossage + jeu axial 3 mm
-    z_horn_top = zi - HUB_CB_H - 3.0 + EPS
+    zi = WHEEL_W + hub_l                  # bout du moyeu (côté servo)
+    # Les profondeurs d'empreinte sont les mêmes des deux côtés.
+    p = cotes.PILE_PANSE
+    outils = []
+    # cavité du capot (ronde : la roue tourne autour d'un capot fixe)
+    cd = p['cap_cavity_depth']
+    outils.append(cylindre('capcav', cotes.CAP_CAVITY_D, cd + EPS, 'Z', (0, 0, zi - cd / 2 + EPS), 64))
+    # empreinte en croix, du bout jusqu'au fond calculé
+    z_floor = zi - p['pocket_depth']
+    arm_l = HORN_ARM_L + 2 * cotes.HORN_FIT
+    arm_w = HORN_ARM_W + 2 * cotes.HORN_FIT
     for a in (0, 90):
         m = Matrix.Rotation(math.radians(a), 4, 'Z')
-        arm = boite(f'horn{a}', -HORN_ARM_L/2, HORN_ARM_L/2, -HORN_ARM_W/2, HORN_ARM_W/2, z_horn_top - HORN_T, zi + 1)
-        arm.matrix_world = m @ arm.matrix_world; outils.append(arm)
-    for sx in (-1, 1):
-        for r in [HORN_SCREW_R0 + (HORN_SCREW_R1-HORN_SCREW_R0)*i/4 for i in range(5)]:
-            outils.append(cylindre(f'os{sx}{r:.1f}', 2.4, WHEEL_W*3, 'Z', (sx*r, 0, WHEEL_W/2), 24))   # oblongs (vis palonnier) traversent le disque
+        arm = boite(f'horn{a}', -arm_l / 2, arm_l / 2, -arm_w / 2, arm_w / 2, z_floor, zi + 1)
+        arm.matrix_world = m @ arm.matrix_world
+        outils.append(arm)
+    # alésage d'arbre borgne : s'arrête avant la face gravée
+    bd = p['shaft_bore_depth']
+    outils.append(cylindre('bore', HUB_BORE_D, bd + EPS, 'Z', (0, 0, zi - bd / 2 + EPS), 32))
     soustraire(disk, outils)
     return nettoyer(disk)
 
@@ -610,26 +721,23 @@ def rendu(objets_mats, chemin, vue='face'):
     sc.render.filepath = chemin; bpy.ops.render.render(write_still=True)
     print(f"  [PNG] {os.path.basename(chemin)}")
 
-def assemblage_pour_rendu(front, back, wheel, tire):
-    """Copies posées à leur place. Après miroir_x : x → GW − x. Plans internes des roues : GW − x_in_R (gauche), GW − x_in_L (droite)."""
-    r_low = (LOW['zt'] - LOW['zb'])/2; cz_low = (LOW['zt'] + LOW['zb'])/2
-    x_wall_R = (LOW['xr'] - r_low) + math.sqrt(r_low**2 - (AXLE_Z - cz_low)**2)
-    TUBE = (GW + WHEEL_GAP) - x_wall_R
-    # bout du moyeu = 1 mm DANS l'épaisseur de la paroi latérale (alésée). Après miroir x → GW − x :
-    xL, xR = GW - x_wall_R + 1.0, GW - 1.0     # 12 (paroi courbe, gauche) et 89 (spine, droite)
+def assemblage_pour_rendu(front, back, roue_panse, roue_spine, tire):
+    """Copies posées à leur place. Les origines sont les faces externes."""
+    face_g, face_d, _milieu, _ent = cotes.roues_apres_miroir()
     O = _mat('orange', (0.97, 0.58, 0.10, 1)); D = _mat('dark', (0.10, 0.10, 0.11, 1), 0.6); T = _mat('tpu', (0.16, 0.16, 0.16, 1), 0.9)
     objs = [(front, O), (back, O)]
-    for sx, xw in ((-1, xL), (1, xR)):
-        w = dupliquer(wheel, f'wheel{sx}'); t = dupliquer(tire, f'tire{sx}')
-        # roue locale : axe Z, face externe z=0, disque z∈[0,10], moyeu z∈[10,23]. Le bout du moyeu (z=23) va au plan xw.
-        # pneu local : z∈[0, TIRE_W] → centré sur le disque : décalage (WHEEL_W − TIRE_W)/2
-        dt = (WHEEL_W - TIRE_W)/2
-        if sx < 0:   # +Z local → +X : rot +90° ; z=23 local → x = origine + 23 = xw → origine = xw − 23
-            w.matrix_world = Matrix.Translation((xw - (WHEEL_W + HUB_L), 0, AXLE_Z)) @ Matrix.Rotation(math.radians(90), 4, 'Y')
-            t.matrix_world = Matrix.Translation((xw - (WHEEL_W + HUB_L) + dt, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(90), 4, 'Y')
-        else:        # +Z local → −X : rot −90° ; z=23 local → x = origine − 23 = xw → origine = xw + 23
-            w.matrix_world = Matrix.Translation((xw + (WHEEL_W + HUB_L), 0, AXLE_Z)) @ Matrix.Rotation(math.radians(-90), 4, 'Y')
-            t.matrix_world = Matrix.Translation((xw + (WHEEL_W + HUB_L) - dt, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(-90), 4, 'Y')
+    dt = (WHEEL_W - TIRE_W)/2
+    # panse = x petit, moyeu long, +Z local vers +X. spine = x grand.
+    for wheel, face, sens, nom in (
+            (roue_panse, face_g, +1, 'panse'),
+            (roue_spine, face_d, -1, 'spine')):
+        w = dupliquer(wheel, 'wheel_' + nom); t = dupliquer(tire, 'tire_' + nom)
+        if sens > 0:
+            w.matrix_world = Matrix.Translation((face, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(90), 4, 'Y')
+            t.matrix_world = Matrix.Translation((face + dt, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(90), 4, 'Y')
+        else:
+            w.matrix_world = Matrix.Translation((face, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(-90), 4, 'Y')
+            t.matrix_world = Matrix.Translation((face - dt, 0, AXLE_Z)) @ Matrix.Rotation(math.radians(-90), 4, 'Y')
         objs += [(w, D), (t, T)]
     return objs
 
@@ -637,7 +745,8 @@ def assemblage_pour_rendu(front, back, wheel, tire):
 def miroir_x(ob):
     """Le glyphe est construit avec le spine en x=0 (à gauche dans le repère), mais vu de FACE (+Y vers -Y)
     x croît vers la gauche de l'observateur → le ₿ apparaîtrait en miroir. On retourne le corps en X
-    (x → GW - x) pour que le ₿ se lise correctement de face. Appliqué aux 2 coques (roues symétriques : inchangées)."""
+    (x → GW - x) pour que le ₿ se lise correctement de face. Appliqué aux 2 coques.
+    Les roues ne sont pas miroirées : chacune a son STL (moyeu long côté panse)."""
     bpy.context.view_layer.objects.active = ob; bpy.ops.object.select_all(action='DESELECT'); ob.select_set(True)
     ob.matrix_world = Matrix.Translation((GW, 0, 0)) @ Matrix.Scale(-1, 4, (1, 0, 0)) @ ob.matrix_world
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
@@ -648,17 +757,20 @@ def miroir_x(ob):
 def main():
     raz_scene()
     print('== ₿ BalanceBot v3 ==')
+    print('  ' + cotes.resume())
     env = build_body()
     front, back = split_body(env)
     miroir_x(front); miroir_x(back)
     exporter(front, os.path.join(OUT, 'b_front.stl'))
     exporter(back, os.path.join(OUT, 'b_back.stl'))
-    w = build_wheel(); exporter(w, os.path.join(OUT, 'coin_wheel.stl'))
+    wp = build_wheel(cotes.HUB_PANSE, 'coin_wheel_panse')
+    exporter(wp, os.path.join(OUT, 'coin_wheel_panse.stl'))
+    ws = build_wheel(cotes.HUB_SPINE, 'coin_wheel_spine')
+    exporter(ws, os.path.join(OUT, 'coin_wheel_spine.stl'))
     t = build_tire(); exporter(t, os.path.join(OUT, 'coin_tire.stl'))
     if '--preview' in sys.argv:
-        objs = assemblage_pour_rendu(front, back, w, t)
-        # les originaux roue/pneu restent à l'origine : on les cache
-        w.hide_render = True; t.hide_render = True
+        objs = assemblage_pour_rendu(front, back, wp, ws, t)
+        wp.hide_render = True; ws.hide_render = True; t.hide_render = True
         rendu(objs, os.path.join(OUT, 'preview_front.png'), 'face')
         rendu(objs, os.path.join(OUT, 'preview_iso.png'), 'iso')
         # intérieur : coque arrière seule vue du plan de joint (aménagements), coque avant seule vue de dos
